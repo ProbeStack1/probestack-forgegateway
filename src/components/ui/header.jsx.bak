@@ -1,0 +1,215 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  LayoutDashboard, Server, Layers, Puzzle, ClipboardCheck, Rocket, TestTube,
+  User, LogOut as LogOutIcon, Activity, Settings, Shield, Github, Database, Server as ServerIcon, Cloud
+} from 'lucide-react';
+import { Button } from './button';
+
+// Navigation items - shared across all pages
+const navItems = [
+  { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { id: 'microservices', icon: Server, label: 'Microservice' },
+  { id: 'proxy-manager', icon: Layers, label: 'Proxy' },
+  { id: 'mcp-generation', icon: Puzzle, label: 'MCP' },
+  { id: 'mcp-test', icon: ClipboardCheck, label: 'MCP Test' },
+  { id: 'api-deploy', icon: Rocket, label: 'API Deploy' },
+  { id: 'api-test', icon: TestTube, label: 'API Test' },
+  { id: 'governance', icon: Shield, label: 'Governance' },
+];
+
+// User menu items
+const userMenuItems = [
+  { name: "Profile", path: "/profile", icon: User },
+  { name: "Support", path: "/profile/support", icon: Activity },
+];
+
+// Config menu items
+const configMenuItems = [
+  { name: "GitHub Configuration", path: "/config/github", icon: Github },
+  { name: "Storage Configuration", path: "/config/storage", icon: Database },
+  { name: "CMDB Configuration", path: "/config/cmdb", icon: ServerIcon },
+  { name: "Azure Configuration", path: "/config/azure", icon: Cloud },
+  { name: "Apigee X Configuration", path: "/config/apigee-x", icon: Cloud },
+  { name: "Kong Konnect Configuration", path: "/config/kong", icon: Cloud },
+  // { name: "GCP Configuration", path: "/config/gcp", icon: Cloud },
+  { name: "AWS Configuration", path: "/config/aws", icon: Cloud },
+  { name: "ServiceNow Configuration", path: "/config/servicenow", icon: Settings },
+];
+
+export default function Header({ activePage }) {
+  const navigate = useNavigate();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
+  const configMenuRef = useRef(null);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setIsUserMenuOpen(false);
+      }
+      if (configMenuRef.current && !configMenuRef.current.contains(event.target)) {
+        setIsConfigMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("isLoggedIn");
+    localStorage.removeItem("userEmail");
+    localStorage.removeItem("userName");
+    localStorage.removeItem("userFirstName");
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("pendingAuthEmail");
+    localStorage.removeItem("userRole");
+    localStorage.removeItem("userOrganization");
+    navigate("/");
+  };
+
+  const handleNavClick = (navId) => {
+    if (navId === 'dashboard') navigate('/dashboard');
+    else if (navId === 'mcp-generation') navigate('/mcp-generate');
+    else if (navId === 'proxy-manager') navigate('/proxy-generate');
+    else if (navId === 'api-deploy') navigate('/api-deploy');
+    else if (navId === 'api-test') navigate('/api-test');
+    else if (navId === 'mcp-test') navigate('/mcp-test');
+    else if (navId === 'microservices') navigate('/generate');
+    else if (navId === 'governance') navigate('/governance');
+  };
+
+  return (
+    <header className="h-16 border-b border-dark-700 flex items-center px-6 shrink-0 bg-header-bg">
+      {/* Logo Section */}
+      <div 
+        className="flex items-center gap-2.5 shrink-0 w-48 cursor-pointer hover:opacity-80 transition-opacity"
+        onClick={() => navigate('/')}
+      >
+        <img
+          src="/assets/justlogo.png"
+          alt="ForgeSphere logo"
+          className="h-11 w-auto"
+          onError={(e) => { e.target.onerror = null; e.target.src = '/logo.png'; }}
+        />
+        <div className="flex flex-col justify-center h-11">
+          <span className="text-xl font-extrabold gradient-text font-heading whitespace-nowrap leading-tight">
+            ForgeSphere
+          </span>
+          <span className="text-[0.65rem] text-gray-400 leading-tight whitespace-nowrap">
+            A ProbeStack Product
+          </span>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 flex items-center justify-center gap-1 mx-2">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = item.id === activePage;
+          return (
+            <button
+              key={item.id}
+              onClick={() => handleNavClick(item.id)}
+              className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap shrink-0 ${
+                isActive
+                  ? 'bg-primary/20 text-primary border border-primary/30'
+                  : 'text-gray-300 hover:bg-dark-800/50 hover:text-white'
+              }`}
+              title={item.label}
+            >
+              <Icon className="w-4 h-4 text-white shrink-0" />
+              <span className="hidden lg:inline">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Right Side Actions */}
+      <div className="flex items-center gap-2 shrink-0 ml-auto">
+        {/* Config Menu Dropdown */}
+        <div className="relative" ref={configMenuRef}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="border border-dark-700 bg-dark-800/50 text-white hover:border-primary/50 hover:bg-dark-800 h-9 w-9 p-0"
+            onClick={() => setIsConfigMenuOpen(!isConfigMenuOpen)}
+            title="Config"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
+
+          {isConfigMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 rounded-lg border border-dark-700 bg-[#15192b]/95 backdrop-blur-xl shadow-lg overflow-hidden z-30">
+              <div className="py-1">
+                {configMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.name}
+                      onClick={() => {
+                        navigate(item.path);
+                        setIsConfigMenuOpen(false);
+                      }}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-dark-800/50 transition-colors w-full text-left"
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* User Menu Dropdown */}
+        <div className="relative" ref={userMenuRef}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="border border-dark-700 bg-dark-800/50 text-white hover:border-primary/50 hover:bg-dark-800 h-9 w-9 p-0"
+            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+          >
+            <User className="h-4 w-4" />
+          </Button>
+
+          {isUserMenuOpen && (
+            <div className="absolute right-0 mt-2 w-48 rounded-lg border border-dark-700 bg-[#15192b]/95 backdrop-blur-xl shadow-lg overflow-hidden z-30">
+              <div className="py-1">
+                {userMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.name}
+                      onClick={() => {
+                        navigate(item.path);
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:text-white hover:bg-dark-800/50 transition-colors w-full text-left"
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Logout Button */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="border border-dark-700 bg-dark-800/50 text-white hover:border-red-500/50 hover:bg-red-500/10 h-9 w-9 p-0"
+          onClick={handleLogout}
+        >
+          <LogOutIcon className="h-4 w-4" />
+        </Button>
+      </div>
+    </header>
+  );
+}

@@ -1,0 +1,32 @@
+/* Scoped styles for Proxy Editor only - prevents affecting global design */
+
+/* Remove blank space at top when editing proxy/shared flow (overrides #root padding from App.css) */
+#root:has([data-proxy-editor="true"]) {
+  padding: 0;
+  margin: 0;
+  max-width: none;
+  text-align: left;
+}
+
+[data-proxy-editor="true"] ::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
+[data-proxy-editor="true"] .sidebar,
+[data-proxy-editor="true"] .main { overflow: hidden; }
+
+/* Allow inner scrolling for Monaco editor only (so you can scroll code) */
+[data-proxy-editor="true"] .editorHost { overflow: auto; }
+
+/* Smooth expand animation for flow sections */
+[data-proxy-editor="true"] .expand-section {
+  transition: max-height 0.25s ease-out, opacity 0.25s ease-out;
+}
+
+/* Make flow headers clickable */
+[data-proxy-editor="true"] .lane-group .lane-title {
+  user-select: none;
+  cursor: pointer;
+}
+
+/* Optional: subtle hover cue on headers */
+[data-proxy-editor="true"] .lane-group .lane-title:hover {
+  opacity: 0.9;
+}

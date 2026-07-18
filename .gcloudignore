@@ -1,0 +1,9 @@
+# Used by gcloud builds submit; omit unneeded files from upload
+.git
+.gitignore
+node_modules
+README.md
+.env
+.env.*
+*.log
+.github

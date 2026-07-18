@@ -1,0 +1,47 @@
+{
+  "name": "forge-gateway",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "generate:apigeelint-rules": "node scripts/generate-apigeelint-rules.mjs"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@stoplight/spectral-core": "^1.23.0",
+    "@stoplight/spectral-rulesets": "^1.22.3",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "axios": "^1.15.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fast-xml-parser": "^4.5.0",
+    "framer-motion": "^12.40.0",
+    "highcharts": "^12.6.0",
+    "highcharts-react-official": "^3.2.3",
+    "js-yaml": "^4.1.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.6.0",
+    "react-router-dom": "^7.13.1",
+    "recharts": "^2.10.0",
+    "tailwind-merge": "^2.5.4",
+    "yarn": "^1.22.22"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "apigeelint": "^2.85.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "vite": "^6.0.1"
+  }
+}

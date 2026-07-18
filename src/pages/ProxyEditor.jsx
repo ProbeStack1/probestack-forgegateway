@@ -1,0 +1,3890 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import Editor from '@monaco-editor/react'
+import JSZip from 'jszip'
+import { XMLParser } from 'fast-xml-parser'
+import yaml from 'js-yaml'
+import {
+  Trash2,
+  Plus,
+  X,
+  Settings2,
+  GitCompare,
+  Search,
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  ChevronLeft,
+  FileCode,
+  Folder as FolderIcon,
+  Save,
+  Download,
+  Upload,
+  RefreshCw,
+  MoreVertical,
+  CheckCircle2,
+  AlertCircle,
+  Bot,
+  Monitor,
+  LayoutGrid,
+  FileText,
+  Check,
+  Layers,
+  Maximize2,
+  Minimize2,
+  Book
+} from 'lucide-react'
+import axios from '../lib/axios'
+import styles from './ProxyEditor.module.css'
+import './ProxyEditorExpand.css'
+import { ResourceAIAssistance } from '../components/ResourceAIAssistance'
+
+const apiproxyRoot = 'apiproxy/'
+
+function getProfileConfigServiceBaseUrl() {
+  if (import.meta.env.DEV) return '/profile-config'
+  const url = import.meta.env.VITE_PROFILE_CONFIG_SERVICE_URL
+  return url
+}
+const PROFILE_CONFIG_BASE = getProfileConfigServiceBaseUrl()
+
+function getMigrationServiceBaseUrl() {
+  const url = import.meta.env.VITE_MIGRATION_SERVICE_URL
+  return url
+}
+const MIGRATION_BASE = getMigrationServiceBaseUrl()
+
+function getDeploymentsServiceBaseUrl() {
+  const url = import.meta.env.VITE_DEPLOYMENTS_SERVICE_URL
+  return url
+}
+const DEPLOYMENTS_BASE = getDeploymentsServiceBaseUrl()
+
+function getAssessmentServiceBaseUrl() {
+  const url = import.meta.env.VITE_ASSESSMENT_SERVICE_URL
+  return url
+}
+const ASSESSMENT_BASE = getAssessmentServiceBaseUrl()
+
+/* ----------------------- Policy catalog (short) ----------------------- */
+const POLICY_CATALOG = {
+  'Security & Access': [
+    { key: 'VerifyAPIKey', label: 'Verify API Key' },
+    { key: 'OAuthV2', label: 'OAuth V2' },
+  ],
+  Mediation: [
+    { key: 'AssignMessage', label: 'Assign Message' },
+    { key: 'ExtractVariables', label: 'Extract Variables' },
+    { key: 'RaiseFault', label: 'Raise Fault' },
+  ],
+  'Traffic Mgmt': [
+    { key: 'SpikeArrest', label: 'Spike Arrest' },
+    { key: 'Quota', label: 'Quota' },
+  ],
+}
+
+const POLICY_DOCS = {
+  VerifyAPIKey: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/verify-api-key-policy', label: 'Verify API Key' },
+  OAuthV2: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/oauthv2-policy', label: 'OAuthV2' },
+  AssignMessage: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/assign-message-policy', label: 'Assign Message' },
+  ExtractVariables: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/extract-variables-policy', label: 'Extract Variables' },
+  RaiseFault: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/raise-fault-policy', label: 'Raise Fault' },
+  SpikeArrest: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/spike-arrest-policy', label: 'Spike Arrest' },
+  Quota: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/quota-policy', label: 'Quota' },
+  Generic: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies', label: 'Policy Reference' },
+}
+
+const MINIMAL_POLICY_XML = (type, name) => `<?xml version="1.0" encoding="UTF-8"?>
+<${type || 'Policy'} name="${name}">
+  <DisplayName>${name}</DisplayName>
+</${type || 'Policy'}>
+`
+
+/* ----------------------- Helpers ----------------------- */
+function getPolicyPrefix(type) {
+  if (!type) return 'PL'
+  const words = type.replace(/([a-z])([A-Z])/g, '$1 $2').split(/\s+/).filter(Boolean)
+  const prefix = words.map(w => w[0].toUpperCase()).join('').slice(0, 3)
+  return prefix || type.slice(0, 3).toUpperCase()
+}
+function fmtBytes(n) { if (n === 0) return '0 B'; const k = 1024, u = ['B', 'KB', 'MB', 'GB'], i = Math.floor(Math.log(n) / Math.log(k)); return (n / Math.pow(k, i)).toFixed(2) + ' ' + u[i] }
+function langForPath(p) {
+  if (/\.xml$/i.test(p)) return 'xml'
+  if (/\.json$/i.test(p)) return 'json'
+  if (/\.ya?ml$/i.test(p)) return 'yaml'
+  if (/\.js$/i.test(p)) return 'javascript'
+  if (/\.md$/i.test(p)) return 'markdown'
+  if (/\.xsl$/i.test(p)) return 'xml'
+  if (/\.properties$/i.test(p)) return 'plaintext'
+  if (/\.java$/i.test(p)) return 'java'
+  return 'plaintext'
+}
+function stripXmlExt(name) { return name.replace(/\.xml$/i, '') }
+const xmlParser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, parseAttributeValue: false })
+
+/* Default skeleton so app boots even with no import */
+const defaultSkeleton = ({ name = 'SampleProxy', basePath = '/v1', targetUrl = 'https://httpbin.org/anything' } = {}) => {
+  const files = {}
+  files[`${apiproxyRoot}${name}.xml`] = `<?xml version="1.0" encoding="UTF-8"?>
+<APIProxy name="${name}">
+  <DisplayName>${name}</DisplayName>
+  <Description>Generated by Forge Editor</Description>
+  <TargetEndpoints><TargetEndpoint>default</TargetEndpoint></TargetEndpoints>
+  <ProxyEndpoints><ProxyEndpoint>default</ProxyEndpoint></ProxyEndpoints>
+  <Policies><Policy>Verify-API-Key</Policy></Policies>
+</APIProxy>
+`
+  files[`${apiproxyRoot}proxies/default.xml`] = `<?xml version="1.0" encoding="UTF-8"?>
+<ProxyEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request>
+      <Step><Name>Verify-API-Key</Name></Step>
+    </Request>
+    <Response/>
+  </PreFlow>
+  </PostFlow>
+  <PostClientFlow name="PostClientFlow">
+    <Response/>
+  </PostClientFlow>
+  <HTTPProxyConnection>
+    <BasePath>${basePath}</BasePath>
+    <VirtualHost>default</VirtualHost>
+  </HTTPProxyConnection>
+  <RouteRule name="to-default"><TargetEndpoint>default</TargetEndpoint></RouteRule>
+</ProxyEndpoint>
+`
+  files[`${apiproxyRoot}targets/default.xml`] = `<?xml version="1.0" encoding="UTF-8"?>
+<TargetEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request/>
+    <Response/>
+  </PreFlow>
+  <PostFlow name="PostFlow">
+    <Request/>
+    <Response/>
+  </PostFlow>
+  <HTTPTargetConnection><URL>${targetUrl}</URL></HTTPTargetConnection>
+</TargetEndpoint>
+`
+  files[`${apiproxyRoot}policies/Verify-API-Key.xml`] = `<?xml version="1.0" encoding="UTF-8"?>
+<VerifyAPIKey name="Verify-API-Key">
+  <DisplayName>Verify-API-Key</DisplayName>
+  <APIKey ref="request.queryparam.apikey"/>
+</VerifyAPIKey>
+`
+  return files
+}
+
+/* File lists */
+function listProxyEndpoints(files) {
+  return Array.from(files.keys()).filter(p => p.startsWith('apiproxy/proxies/') && p.endsWith('.xml')).sort()
+}
+function listTargetEndpoints(files) {
+  return Array.from(files.keys()).filter(p => p.startsWith('apiproxy/targets/') && p.endsWith('.xml')).sort()
+}
+function listResources(files) {
+  return Array.from(files.keys()).filter(p => p.includes('/resources/')).sort()
+}
+function listBundleRoot(files) {
+  return Array.from(files.keys()).filter(p =>
+    p.endsWith('.xml') &&
+    !p.toLowerCase().includes('manifest.xml') &&
+    !p.includes('/policies/') &&
+    !p.includes('/proxies/') &&
+    !p.includes('/targets/') &&
+    !p.includes('/resources/')
+  ).sort()
+}
+function listPolicyNames(files) {
+  return Array.from(files.keys())
+    .filter(p => p.includes('/policies/') && p.endsWith('.xml'))
+    .map(p => p.split('/').pop().replace(/\.xml$/, ''))
+    .sort()
+}
+function listPolicyPaths(files) {
+  return Array.from(files.keys())
+    .filter(p => p.includes('/policies/') && p.endsWith('.xml'))
+    .sort()
+}
+
+/* ------- Bundle type & SharedFlow helpers ------- */
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+function detectBundleType(filesMap) {
+  for (const [path, content] of filesMap.entries()) {
+    if (!path.endsWith('.xml')) continue
+    if (/<\s*SharedFlow\b/i.test(content)) return 'sharedflow'
+    if (/<\s*APIProxy\b/i.test(content)) return 'proxy'
+  }
+  return 'proxy'
+}
+function getSharedFlowMainPath(filesMap) {
+  const preferred = Array.from(filesMap.keys()).find(
+    p => p.includes('sharedflowbundle/sharedflows/') && p.endsWith('/default.xml')
+  )
+  if (preferred) return preferred
+  return Array.from(filesMap.keys()).find(
+    p => p.includes('sharedflowbundle/sharedflows/') && p.endsWith('.xml')
+  ) || null
+}
+function getSharedFlowPoliciesPrefix(filesMap) {
+  const p = getSharedFlowMainPath(filesMap)
+  if (!p) return null
+  const i = p.indexOf('/sharedflows/')
+  if (i === -1) return p.replace(/\/[^/]+\.xml$/, '') + '/policies/'
+  return p.slice(0, i) + '/policies/'
+}
+function parseSharedFlowSteps(xml) {
+  if (!xml) return []
+  const stepRe = /<Step>\s*<Name>\s*([^<]+)\s*<\/Name>\s*<\/Step>/gi
+  const steps = []
+  let match
+  while ((match = stepRe.exec(xml)) !== null) steps.push(match[1].trim())
+  return steps
+}
+function replaceSharedFlowSteps(xml, steps) {
+  const stepsXml = steps.map(n => `  <Step>\n    <Name>${n}</Name>\n  </Step>`).join('\n')
+  return xml.replace(
+    /(<SharedFlow[^>]*>)[\s\S]*?(<\/SharedFlow>)/i,
+    `$1\n${stepsXml}\n$2`
+  )
+}
+function addPolicyStepToSharedFlowXml(xml, policyName) {
+  if (!xml) return xml
+  const duplicate = new RegExp(
+    `<Step>\\s*<Name>\\s*${escapeRegExp(policyName)}\\s*<\\/Name>\\s*<\\/Step>`,
+    'i'
+  )
+  if (duplicate.test(xml)) return xml
+  const formattedStep = `  <Step>\n    <Name>${policyName}</Name>\n  </Step>`
+  const stepMatch = xml.match(/(<Step>[\s\S]*?<\/Step>)(?![\s\S]*<Step>)/i)
+  if (stepMatch) return xml.replace(stepMatch[0], `${stepMatch[0]}\n${formattedStep}`)
+  if (/<\/SharedFlow>/i.test(xml)) return xml.replace(/<\/SharedFlow>/i, `\n${formattedStep}\n</SharedFlow>`)
+  return xml
+}
+function removeSharedFlowStep(sharedflowXml, policyName) {
+  const re = new RegExp(
+    `<Step>\\s*<Name>${(policyName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/Name>\\s*<\\/Step>\\s*`,
+    'g'
+  )
+  return sharedflowXml.replace(re, '')
+}
+
+/* ------- Parse steps in Pre/Post flows (lanes at top) ------- */
+function parseSteps(xml, section) {
+  if (!xml || typeof xml !== 'string') return []
+  const map = {
+    'pre-request': /<PreFlow[\s\S]*?(?:<Request(?:\s[^>]*)?\s*\/>|<Request(?:\s[^>]*)?>([\s\S]*?)<\/Request>)/i,
+    'pre-response': /<PreFlow[\s\S]*?(?:<Response(?:\s[^>]*)?\s*\/>|<Response(?:\s[^>]*)?>([\s\S]*?)<\/Response>)/i,
+    'post-request': /<PostFlow[\s\S]*?(?:<Request(?:\s[^>]*)?\s*\/>|<Request(?:\s[^>]*)?>([\s\S]*?)<\/Request>)/i,
+    'post-response': /<PostFlow[\s\S]*?(?:<Response(?:\s[^>]*)?\s*\/>|<Response(?:\s[^>]*)?>([\s\S]*?)<\/Response>)/i,
+    'post-client': /<PostClientFlow[\s\S]*?(?:<Response(?:\s[^>]*)?\s*\/>|<Response(?:\s[^>]*)?>([\s\S]*?)<\/Response>)/i,
+  }
+  const m = xml.match(map[section])
+  if (!m) return []
+  const body = m[1] || ''
+  const stepRe = /<Step>\s*<Name>([^<]+)<\/Name>[\s\S]*?<\/Step>/gi
+  const names = []
+  let mm
+  while ((mm = stepRe.exec(body))) names.push(mm[1])
+  return names
+}
+function replaceSection(xml, section, steps) {
+  if (!xml || typeof xml !== 'string') return xml
+  const tagMap = { 'pre-request': 'Request', 'pre-response': 'Response', 'post-request': 'Request', 'post-response': 'Response', 'post-client': 'Response' }
+  const tag = tagMap[section]
+  const stepXml = steps.map(n => `\n      <Step><Name>${n}</Name></Step>`).join('')
+  const map = {
+    'pre-request': { open: /(<PreFlow[\s\S]*?<Request(?:\s[^>]*)?>)/i, close: /(<\/Request>)/i, scope: /(<PreFlow[\s\S]*?<\/PreFlow>)/i, selfClose: /<Request(?:\s[^>]*)?\s*\/>/i },
+    'pre-response': { open: /(<PreFlow[\s\S]*?<Response(?:\s[^>]*)?>)/i, close: /(<\/Response>)/i, scope: /(<PreFlow[\s\S]*?<\/PreFlow>)/i, selfClose: /<Response(?:\s[^>]*)?\s*\/>/i },
+    'post-request': { open: /(<PostFlow[\s\S]*?<Request(?:\s[^>]*)?>)/i, close: /(<\/Request>)/i, scope: /(<PostFlow[\s\S]*?<\/PostFlow>)/i, selfClose: /<Request(?:\s[^>]*)?\s*\/>/i },
+    'post-response': { open: /(<PostFlow[\s\S]*?<Response(?:\s[^>]*)?>)/i, close: /(<\/Response>)/i, scope: /(<PostFlow[\s\S]*?<\/PostFlow>)/i, selfClose: /<Response(?:\s[^>]*)?\s*\/>/i },
+    'post-client': { open: /(<PostClientFlow[\s\S]*?<Response(?:\s[^>]*)?>)/i, close: /(<\/Response>)/i, scope: /(<PostClientFlow[\s\S]*?<\/PostClientFlow>)/i, selfClose: /<Response(?:\s[^>]*)?\s*\/>/i },
+  }
+  const cfg = map[section]
+  const scopeMatch = xml.match(cfg.scope)
+  if (!scopeMatch) return xml
+  const scope = scopeMatch[1]
+  // Handle self-closing tags first (e.g. <Response/>); open regex requires ">" so it won't match self-closing
+  const selfCloseMatch = scope.match(cfg.selfClose)
+  if (selfCloseMatch) {
+    const newTag = `<${tag}>${stepXml}\n    </${tag}>`
+    const newScope = scope.replace(cfg.selfClose, newTag)
+    return xml.replace(cfg.scope, () => newScope)
+  }
+  const openMatch = scope.match(cfg.open)
+  if (!openMatch) return xml
+  const closeMatch = scope.match(cfg.close)
+  if (closeMatch) {
+    const before = scope.slice(0, openMatch.index + openMatch[1].length)
+    const after = scope.slice(closeMatch.index)
+    const newScope = before + stepXml + after
+    return xml.replace(cfg.scope, () => newScope)
+  }
+  return xml
+}
+
+/* ---------------- Flows: parse, edit, reorder ---------------- */
+function getFlowBlocks(proxyXml) {
+  const blocks = []
+  const scope = proxyXml.match(/<Flows>([\s\S]*?)<\/Flows>/i)
+  if (!scope) return blocks
+  const re = /<Flow\b[^>]*name="([^"]+)"[^>]*>([\s\S]*?)<\/Flow>/gi
+  let m
+  while ((m = re.exec(proxyXml)) !== null) {
+    const name = m[1]
+    const body = m[2] || ''
+    const start = m.index
+    const end = re.lastIndex
+    const cond = body.match(/<Condition>([\s\S]*?)<\/Condition>/i)?.[1]?.trim() || ''
+    const req = (body.match(/<Request>([\s\S]*?)<\/Request>/i)?.[1] || '')
+    const res = (body.match(/<Response>([\s\S]*?)<\/Response>/i)?.[1] || '')
+    const stepRe = /<Step>\s*<Name>([^<]+)<\/Name>[\s\S]*?<\/Step>/gi
+    const requestSteps = []; const responseSteps = []
+    let s
+    while ((s = stepRe.exec(req))) requestSteps.push(s[1])
+    stepRe.lastIndex = 0
+    while ((s = stepRe.exec(res))) responseSteps.push(s[1])
+    blocks.push({ name, condition: cond, requestSteps, responseSteps, block: proxyXml.slice(start, end), start, end })
+  }
+  return blocks
+}
+function ensureFlowsContainer(proxyXml) {
+  if (/<Flows>[\s\S]*?<\/Flows>/i.test(proxyXml)) return proxyXml
+  const preEnd = proxyXml.search(/<\/PreFlow>/i)
+  if (preEnd !== -1) {
+    const before = proxyXml.slice(0, preEnd + '</PreFlow>'.length)
+    const after = proxyXml.slice(preEnd + '</PreFlow>'.length)
+    return `${before}\n  <Flows>\n  </Flows>\n${after}`
+  }
+  return proxyXml.replace(/<ProxyEndpoint[^>]*>/i, (m) => `${m}\n  <Flows>\n  </Flows>`)
+}
+function flowXmlBlock({ name, condition, requestSteps = [], responseSteps = [] }) {
+  const req = requestSteps.map(n => `      <Step><Name>${n}</Name></Step>`).join('\n')
+  const res = responseSteps.map(n => `      <Step><Name>${n}</Name></Step>`).join('\n')
+  const cond = condition ? `\n    <Condition>${condition}</Condition>` : ''
+  return `  <Flow name="${name}">
+    <Request>
+${req}
+    </Request>
+    <Response>
+${res}
+    </Response>${cond}
+  </Flow>`
+}
+function upsertFlowInProxyXml(proxyXml, { originalName, name, condition, requestSteps, responseSteps }) {
+  let xml = ensureFlowsContainer(proxyXml)
+  const blocks = getFlowBlocks(xml)
+  const newBlock = flowXmlBlock({ name, condition, requestSteps: requestSteps || [], responseSteps: responseSteps || [] })
+  if (originalName && blocks.some(b => b.name === originalName)) {
+    const b = blocks.find(x => x.name === originalName)
+    return xml.slice(0, b.start) + newBlock + xml.slice(b.end)
+  }
+  return xml.replace(/<\/Flows>/i, `${newBlock}\n  </Flows>`)
+}
+function deleteFlowFromProxyXml(proxyXml, name) {
+  const blocks = getFlowBlocks(proxyXml)
+  const b = blocks.find(x => x.name === name)
+  if (!b) return proxyXml
+  return proxyXml.slice(0, b.start) + proxyXml.slice(b.end)
+}
+function xmlFromBlocks(proxyXml, list) {
+  return proxyXml.replace(/<Flows>[\s\S]*?<\/Flows>/i, () => `<Flows>\n${list.join('\n')}\n  </Flows>`)
+}
+function addPolicyToFlow(proxyXml, name, which, policyName) {
+  const blocks = getFlowBlocks(proxyXml)
+  const b = blocks.find(x => x.name === name)
+  if (!b) return proxyXml
+  const req = [...b.requestSteps]
+  const res = [...b.responseSteps]
+  if (which === 'request' && !req.includes(policyName)) req.push(policyName)
+  if (which === 'response' && !res.includes(policyName)) res.push(policyName)
+  const newBlock = flowXmlBlock({ name: b.name, condition: b.condition, requestSteps: req, responseSteps: res })
+  return proxyXml.slice(0, b.start) + newBlock + proxyXml.slice(b.end)
+}
+function removePolicyFromFlow(proxyXml, name, which, policyName) {
+  const blocks = getFlowBlocks(proxyXml)
+  const b = blocks.find(x => x.name === name)
+  if (!b) return proxyXml
+  const req = which === 'request' ? b.requestSteps.filter(n => n !== policyName) : b.requestSteps
+  const res = which === 'response' ? b.responseSteps.filter(n => n !== policyName) : b.responseSteps
+  const newBlock = flowXmlBlock({ name: b.name, condition: b.condition, requestSteps: req, responseSteps: res })
+  return proxyXml.slice(0, b.start) + newBlock + proxyXml.slice(b.end)
+}
+
+function removePolicyFromXml(xml, policyName) {
+  const re = new RegExp(
+    `<Step>\\s*<Name>${(policyName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/Name>\\s*<\\/Step>\\s*`,
+    'g'
+  );
+  return xml.replace(re, '');
+}
+
+function removePolicyFromMainXml(xml, policyName) {
+  const re = new RegExp(
+    `<Policy>\\s*${(policyName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*<\\/Policy>\\s*`,
+    'g'
+  );
+  return xml.replace(re, '');
+}
+
+/* ----------------- Policy docs helper ----------------- */
+function detectPolicyTypeFromXml(xmlText) {
+  const m = xmlText.match(/<\s*([A-Za-z0-9]+)\b/)
+  return m ? m[1] : null
+}
+function getPolicyDocsInfo(policyXml) {
+  const t = detectPolicyTypeFromXml(policyXml) || 'Generic'
+  return POLICY_DOCS[t] || POLICY_DOCS.Generic
+}
+
+/* ----------------- Flow label helpers ----------------- */
+function extractVerbFromCondition(cond = '') {
+  const m = cond.match(/request\.verb\s*=\s*"([A-Z]+)"/i)
+  return m ? m[1].toUpperCase() : null
+}
+function hasAnyCondition(cond = '') { return !!(cond && cond.trim().length) }
+function pillClassForVerb(verb = 'All') {
+  const v = (verb || 'All').toUpperCase()
+  switch (v) {
+    case 'GET': return 'pill pill-get'
+    case 'POST': return 'pill pill-post'
+    case 'PUT': return 'pill pill-put'
+    case 'DELETE': return 'pill pill-delete'
+    case 'PATCH': return 'pill pill-patch'
+    default: return 'pill pill-all'
+  }
+}
+function extractPathFromCondition(cond = '') {
+  const m = cond.match(/MatchesPath\s+"([^"]+)"/i)
+  return m ? m[1] : ''
+}
+
+/* ----------------- UI Bits ----------------- */
+function Caret({ open, onClick }) {
+  return (
+    <span
+      onClick={onClick}
+      style={{
+        display: 'inline-block', width: 16, textAlign: 'center', fontSize: 18, lineHeight: '16px',
+        transform: `rotate(${open ? 90 : 0}deg)`, transition: 'transform .16s', cursor: 'pointer', opacity: .9
+      }}
+    >▸</span>
+  )
+}
+const Spinner = () => (
+  <span aria-label="loading" style={{
+    display: 'inline-block', width: 16, height: 16, border: '2px solid var(--border)',
+    borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin .8s linear infinite'
+  }} />
+)
+
+/* Env tag util for revision names */
+function withEnvTag(name, env) {
+  const tag = `[${env}]`
+  return name.includes(tag) ? name : `${name} ${tag}`
+}
+function parseRevLabel(name) {
+  const m = name.match(/(?:rev\s+)?(\d+)/i)
+  return m ? `${m[1]}` : name
+}
+
+/* ===================== MAIN APP ===================== */
+export const ProxyEditor = ({ selectedProxyName, initialZipUrl, onBack }) => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const editorSelectedProxyName = selectedProxyName || location.state?.selectedProxyName
+  const handleBack = onBack || (() => {
+    if (location.state?.backTo) {
+      navigate(location.state.backTo, { state: location.state.backState || {} })
+      return
+    }
+
+    navigate(-1)
+  })
+  const zipUrlLoadedRef = useRef(false)
+  const [files, setFiles] = useState(new Map())
+  const [currentPath, setCurrentPath] = useState(null)
+  const [status, setStatus] = useState({ kind: 'warn', msg: 'Ready' })
+  const [bundleSize, setBundleSize] = useState('–')
+  const fileInputRef = useRef(null)
+  const oasInputRef = useRef(null) // NEW: for OpenAPI import
+
+  const [collapseTop, setCollapseTop] = useState(false)
+  const editorWrapRef = useRef(null)
+
+  const [flowSide, setFlowSide] = useState('proxy')
+  const [selectedProxy, setSelectedProxy] = useState(null)
+  const [selectedTarget, setSelectedTarget] = useState(null)
+
+  const [revisions, setRevisions] = useState([])
+  const [selectedRevisionId, setSelectedRevisionId] = useState('working')
+  const [revMenuOpen, setRevMenuOpen] = useState(false)
+  const revBtnRef = useRef(null)
+
+  const [saveDropdownOpen, setSaveDropdownOpen] = useState(false)
+  const saveBtnRef = useRef(null)
+
+  const [endpointDropdownOpen, setEndpointDropdownOpen] = useState(false)
+  const endpointBtnRef = useRef(null)
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  const kebabRef = useRef(null)
+
+  //const [renameDlg, setRenameDlg] = useState({ open: false, revId: null, name: '' })
+
+  const [deployDlg, setDeployDlg] = useState({
+    open: false,
+    org: searchParams.get('apigeeXOrg') || 'Not Selected',
+    env: searchParams.get('apigeeXEnv') || 'Not Selected',
+    revId: 'working',
+    phase: 'idle'
+  })
+
+  const [saveToGcsInProgress, setSaveToGcsInProgress] = useState(false)
+  const [isSavedToGcs, setIsSavedToGcs] = useState(false)
+  const [gcsConfig, setGcsConfig] = useState(null) // { org, env, bucketName, profileId } from URL (migration steps) + Config > GCS
+
+  const [openGroups, setOpenGroups] = useState({ policies: true, proxies: true, targets: true, resources: true })
+  const [openProxyNodes, setOpenProxyNodes] = useState({})
+  const [openTargetNodes, setOpenTargetNodes] = useState({})
+
+  const [policyAttach, setPolicyAttach] = useState(null)
+  const policyNameRef = useRef(null)
+
+  const [showAI, setShowAI] = useState(false)
+  const [aiMinimized, setAiMinimized] = useState(false)
+
+  // New state for the policy library modal
+  const [policySearch, setPolicySearch] = useState('');
+  const [selectedPolicyLib, setSelectedPolicyLib] = useState(null);
+
+  // Policy library data (exactly as in the HTML)
+  const POLICY_LIBRARY = [
+    {
+      cat: 'AI / LLM',
+      cls: 'ai-item',
+      items: [
+        { name: 'LLM-RoutingPolicy', icon: '🌐', typeKey: 'llm-route' },
+        { name: 'LLM-GuardRails', icon: '🛡️', typeKey: 'llm-guard' },
+        { name: 'LLM-TokenQuota', icon: '📊', typeKey: 'llm-quota' },
+        { name: 'LLM-SemanticCache', icon: '💾', typeKey: 'llm-cache' },
+        { name: 'AI-PromptInjectionGuard', icon: '🚫', typeKey: 'prompt-inject' },
+        { name: 'AI-PIIRedaction', icon: '🔏', typeKey: 'ai-pii' },
+        { name: 'AI-CostTracker', icon: '💰', typeKey: 'ai-cost' },
+        { name: 'LLM-FallbackRouter', icon: '🔄', typeKey: 'llm-fallback' },
+      ],
+    },
+    {
+      cat: 'MCP Gateway',
+      cls: 'mcp-item',
+      items: [
+        { name: 'MCP-AuthValidator', icon: '🔒', typeKey: 'mcp-auth' },
+        { name: 'MCP-ToolRouter', icon: '🌐', typeKey: 'mcp-route' },
+        { name: 'MCP-RateLimit', icon: '⏱️', typeKey: 'mcp-ratelimit' },
+        { name: 'MCP-AuditLogger', icon: '📄', typeKey: 'mcp-log' },
+      ],
+    },
+    {
+      cat: 'Security',
+      cls: '',
+      items: [
+        { name: 'VerifyAPIKey', icon: '🔑', typeKey: 'verify-key' },
+        { name: 'OAuthV2', icon: '🔐', typeKey: 'oauth' },
+        { name: 'JWT Verify', icon: '🎫', typeKey: 'jwt' },
+        { name: 'SpikeArrest', icon: '⚡', typeKey: 'spike' },
+        { name: 'Quota', icon: '📏', typeKey: 'quota' },
+      ],
+    },
+    {
+      cat: 'Mediation',
+      cls: '',
+      items: [
+        { name: 'AssignMessage', icon: '↔️', typeKey: 'assign-message' },
+        { name: 'ExtractVariables', icon: '🔍', typeKey: 'extract-vars' },
+        { name: 'JSONToXML', icon: '{ }', typeKey: 'json-to-xml' },
+        { name: 'JavaScript', icon: 'JS', typeKey: 'javascript' },
+        { name: 'ResponseCache', icon: '💾', typeKey: 'response-cache' },
+      ],
+    },
+  ];
+
+  // Filter function
+  const filterPolicyLib = (q) => {
+    setPolicySearch(q);
+    setSelectedPolicyLib(null);
+  };
+
+  // Helper to generate a unique policy name based on a base name and existing policies
+  const generateUniquePolicyName = (baseName) => {
+    const existingNames = listPolicyNames(files); // returns array of policy names (without .xml)
+    let candidate = baseName;
+    let counter = 1;
+    while (existingNames.includes(candidate)) {
+      candidate = `${baseName}-${counter}`;
+      counter++;
+    }
+    return candidate;
+  };
+  const showPolicyContextMenu = (e, policyPath, policyName) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const confirmDelete = window.confirm(`Delete policy "${policyName}"?`);
+    if (confirmDelete) {
+      onDeletePolicy(policyPath);
+    }
+  };
+
+  // When "Add Policy" is clicked
+  // When "Add Policy" is clicked in the new modal
+  const handleAddSelectedPolicy = async () => {
+    if (!selectedPolicyLib) {
+      setStatus({ kind: 'warn', msg: 'Please select a policy first' });
+      return;
+    }
+
+    // Find the selected policy item
+    let selectedItem = null;
+    for (const cat of POLICY_LIBRARY) {
+      const found = cat.items.find(i => i.name === selectedPolicyLib);
+      if (found) {
+        selectedItem = found;
+        break;
+      }
+    }
+    if (!selectedItem) {
+      setStatus({ kind: 'err', msg: 'Policy not found in library' });
+      return;
+    }
+
+    const typeKey = selectedItem.typeKey;
+    let baseName = selectedItem.name;
+    // For some policies, the XML root element name is different from the display name.
+    // We use the typeKey as the root element for the minimal XML.
+    const policyXmlType = typeKey; // e.g., 'verify-key' but we need actual policy type like 'VerifyAPIKey'
+    // Map typeKey to actual policy element name (used in MINIMAL_POLICY_XML)
+    const typeToElement = {
+      'verify-key': 'VerifyAPIKey',
+      'oauth': 'OAuthV2',
+      'jwt': 'VerifyJWT',
+      'spike': 'SpikeArrest',
+      'quota': 'Quota',
+      'llm-route': 'JavaScript',
+      'llm-guard': 'JavaScript',
+      'llm-quota': 'JavaScript',
+      'llm-cache': 'JavaScript',
+      'prompt-inject': 'JavaScript',
+      'ai-pii': 'JavaScript',
+      'ai-cost': 'StatisticsCollector',
+      'llm-fallback': 'JavaScript',
+      'mcp-auth': 'JavaScript',
+      'mcp-route': 'JavaScript',
+      'mcp-ratelimit': 'JavaScript',
+      'mcp-log': 'MessageLogging',
+      'assign-message': 'AssignMessage',
+      'extract-vars': 'ExtractVariables',
+      'json-to-xml': 'JSONToXML',
+      'javascript': 'JavaScript',
+      'response-cache': 'ResponseCache',
+    };
+    const actualPolicyType = typeToElement[typeKey] || typeKey;
+
+    // Generate a unique name (e.g., "VerifyAPIKey" or "VerifyAPIKey-1")
+    const uniqueName = generateUniquePolicyName(baseName);
+
+    // Create the policy file
+    const policyPath = `${apiproxyRoot}policies/${uniqueName}.xml`;
+    if (files.has(policyPath)) {
+      setStatus({ kind: 'err', msg: `Policy "${uniqueName}" already exists` });
+      return;
+    }
+
+    const policyXml = MINIMAL_POLICY_XML(actualPolicyType, uniqueName);
+    setFiles(prev => {
+      const m = new Map(prev);
+      m.set(policyPath, policyXml);
+      return m;
+    });
+
+    // Now attach to the current context (if any)
+    if (policyAttach?.section === 'sharedflow') {
+      // Add to SharedFlow
+      const sfPath = getSharedFlowMainPath(files);
+      if (sfPath) {
+        setFiles(prev => {
+          const m = new Map(prev);
+          const xml = m.get(sfPath) || '';
+          const updatedXml = addPolicyStepToSharedFlowXml(xml, uniqueName);
+          m.set(sfPath, updatedXml);
+          return m;
+        });
+        setCurrentPath(sfPath);
+        setStatus({ kind: 'ok', msg: `Policy "${uniqueName}" created and added to SharedFlow` });
+      } else {
+        setStatus({ kind: 'ok', msg: `Policy "${uniqueName}" created (SharedFlow not found)` });
+      }
+    } else if (policyAttach?.section && policyAttach?.endpoint) {
+      // Add to a specific endpoint lane
+      const endp = policyAttach.endpoint;
+      const section = policyAttach.section;
+      const xml = files.get(endp) || '';
+      const curr = parseSteps(xml, section);
+      if (!curr.includes(uniqueName)) curr.push(uniqueName);
+      const newXml = replaceSection(xml, section, curr);
+      setFiles(prev => {
+        const m = new Map(prev);
+        m.set(endp, newXml);
+        return m;
+      });
+      setCurrentPath(endp);
+      setStatus({ kind: 'ok', msg: `Policy "${uniqueName}" created and added to ${section.replace('-', ' ')}` });
+    } else {
+      // No attachment context – just created the file
+      setStatus({ kind: 'ok', msg: `Policy "${uniqueName}" created` });
+    }
+
+    // Close modal and reset selection
+    setPolicyDlg(s => ({ ...s, open: false }));
+    setPolicyAttach(null);
+    setSelectedPolicyLib(null);
+    setPolicySearch('');
+  };
+
+  // Render the policy grid using inline styles
+  const renderPolicyLibraryInline = (search, selected, onSelect) => {
+    const filtered = POLICY_LIBRARY.map(cat => ({
+      ...cat,
+      items: cat.items.filter(item =>
+        item.name.toLowerCase().includes(search.toLowerCase()) ||
+        cat.cat.toLowerCase().includes(search.toLowerCase())
+      ),
+    })).filter(cat => cat.items.length > 0);
+
+    return filtered.map(cat => (
+      <React.Fragment key={cat.cat}>
+        <div
+          style={{
+            gridColumn: '1 / -1',
+            padding: '8px 0 4px',
+            fontSize: 10,
+            fontWeight: 700,
+            color: '#7f8fa8',
+            textTransform: 'uppercase',
+            letterSpacing: '0.8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7
+          }}
+        >
+          {cat.cat}
+          <div style={{ flex: 1, height: 1, background: '#2d3748' }} />
+        </div>
+        {cat.items.map(item => (
+          <div
+            key={item.name}
+            onClick={() => onSelect(item.name)}
+            style={{
+              background: '#1e2636',
+              border: `1px solid ${selected === item.name ? '#f97316' : '#2d3748'}`,
+              borderRadius: 10,
+              padding: '10px 12px',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              borderLeft: cat.cls === 'ai-item' ? '2px solid #c084fc' : cat.cls === 'mcp-item' ? '2px solid #22d3ee' : 'none'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = '#f97316';
+              e.currentTarget.style.background = 'rgba(79,142,247,0.12)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = selected === item.name ? '#f97316' : '#2d3748';
+              e.currentTarget.style.background = '#1e2636';
+            }}
+          >
+            <div style={{ fontSize: 18, marginBottom: 5 }}>{item.icon}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>{item.name}</div>
+            <div style={{ fontSize: 10, color: '#7f8fa8', marginTop: 2 }}>{cat.cat}</div>
+          </div>
+        ))}
+      </React.Fragment>
+    ));
+  };
+
+  // Pre-fill from migration context: org/env/company from URL (passed when opening editor from Customize step)
+  useEffect(() => {
+    const urlOrg = searchParams.get('org') ?? ''
+    const urlEnv = searchParams.get('env') ?? ''
+    if (urlOrg || urlEnv) {
+      setGcsConfig(prev => ({
+        org: urlOrg || prev?.org || '',
+        env: urlEnv || prev?.env || '',
+        bucketName: prev?.bucketName || ''
+      }))
+    }
+  }, [searchParams])
+
+  // Fetch GCS config (bucket etc.) from Config > Google Cloud Storage and merge with URL context
+  useEffect(() => {
+    let cancelled = false
+    const endpointUrl = `${PROFILE_CONFIG_BASE}/cloud-storage/profiles`
+    axios.get(endpointUrl, {
+      params: { companyName: localStorage.getItem('companyName') || 'probestack' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      timeout: 15000
+    }).then(res => {
+      if (cancelled) return
+      let projectsData = []
+      if (Array.isArray(res.data)) projectsData = res.data
+      else if (res.data?.data && Array.isArray(res.data.data)) projectsData = res.data.data
+      else if (res.data?.profiles && Array.isArray(res.data.profiles)) projectsData = res.data.profiles
+      else if (res.data && typeof res.data === 'object') {
+        for (const key of Object.keys(res.data)) {
+          if (Array.isArray(res.data[key])) { projectsData = res.data[key]; break }
+        }
+      }
+      if (projectsData.length === 0) return
+      const first = projectsData[0]
+      const profileId = first.profileName ?? first.profileId ?? first.profile_name ?? ''
+      let apiOrg = first.defaultOrganization ?? first.defaultOrg ?? first.organization ?? first.orgName ?? ''
+      let apiEnv = first.defaultEnvironment ?? first.defaultEnv ?? (Array.isArray(first.environments) && first.environments[0]) ?? (first.environment ?? '') ?? ''
+      let apiBucket = first.bucketName ?? first.bucket_name ?? ''
+      if (first.organizations && Array.isArray(first.organizations) && first.organizations.length > 0) {
+        const o = first.organizations[0]
+        apiOrg = o.orgName ?? o.organization ?? o.orgId ?? apiOrg
+        apiEnv = (Array.isArray(o.environments) && o.environments[0]) ?? o.environment ?? apiEnv
+        apiBucket = o.bucketName ?? o.bucket_name ?? apiBucket
+      }
+      setGcsConfig(prev => ({
+        org: (prev?.org && String(prev.org).trim()) ? prev.org : (apiOrg || prev?.org || ''),
+        env: (prev?.env && String(prev.env).trim()) ? prev.env : (apiEnv || prev?.env || ''),
+        bucketName: (apiBucket && String(apiBucket).trim()) ? apiBucket : ((profileId && String(profileId).trim()) ? profileId : (prev?.bucketName || '')),
+        profileId: (profileId && String(profileId).trim()) ? profileId : (prev?.profileId || '')
+      }))
+    }).catch(() => { if (!cancelled) setGcsConfig(prev => prev ? { ...prev } : null) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Reset GCS save status if files or revision changes
+  useEffect(() => {
+    setIsSavedToGcs(false)
+  }, [files, selectedRevisionId])
+
+  // Initial load: either load zip from location.state.zipUrl or ?zipUrl= (e.g. from Migration Queue Edit in new tab) or show default skeleton
+  useEffect(() => {
+    const zipUrl = initialZipUrl ?? location.state?.zipUrl ?? searchParams.get('zipUrl')
+    if (zipUrl && !zipUrlLoadedRef.current) {
+      zipUrlLoadedRef.current = true
+      setStatus({ kind: 'warn', msg: 'Loading proxy from URL…' })
+      const companyName = (typeof localStorage !== 'undefined' && localStorage.getItem('companyName')) || 'probestack'
+      fetch(zipUrl, {
+        headers: {
+          'X-Partner-Id': companyName.toLowerCase()
+        }
+      })
+        .then(r => { if (!r.ok) throw new Error(r.statusText); return r.blob() })
+        .then(blob => JSZip.loadAsync(blob))
+        .then(zip => {
+          const newFiles = new Map()
+          return Promise.all(Object.keys(zip.files).map(async (origPath) => {
+            const e = zip.files[origPath]
+            if (e.dir) return
+            const iApi = origPath.indexOf('apiproxy/')
+            const iSf = origPath.indexOf('sharedflowbundle/')
+            const path = iApi !== -1 ? origPath.slice(iApi) : iSf !== -1 ? origPath.slice(iSf) : null
+            if (!path) return
+            const text = await e.async('string')
+            newFiles.set(path, text)
+          })).then(() => newFiles)
+        })
+        .then(newFiles => {
+          if (newFiles.size === 0) throw new Error('No files under apiproxy/ or sharedflowbundle/')
+          const cached = restoreEditorCache(newFiles)
+          if (cached) {
+            setFiles(cached.files)
+            setCurrentPath(cached.currentPath)
+            setRevisions(cached.revisions)
+            setSelectedRevisionId(cached.selectedRevisionId)
+            setStatus({ kind: 'ok', msg: 'Restored your last saved changes from cache.' })
+          } else {
+            setFiles(newFiles)
+            const roots = listBundleRoot(newFiles)
+            const sfMain = getSharedFlowMainPath(newFiles)
+            const openPath = roots[0]
+              || sfMain
+              || Array.from(newFiles.keys()).find(p => p.startsWith('apiproxy/proxies/') && p.endsWith('.xml'))
+              || Array.from(newFiles.keys())[0]
+            setCurrentPath(openPath)
+            setSelectedRevisionId('working')
+            const bType = detectBundleType(newFiles)
+            setStatus({ kind: 'ok', msg: `Imported ${bType === 'sharedflow' ? 'shared flow' : 'proxy'} bundle from URL.` })
+          }
+        })
+        .catch(e => setStatus({ kind: 'err', msg: `Import from URL failed: ${e.message}` }))
+      return
+    }
+    if (!zipUrl) {
+      const skel = defaultSkeleton({name:editorSelectedProxyName})
+      const m = new Map(Object.entries(skel))
+      const roots = listBundleRoot(m)
+      const cached = restoreEditorCache(m)
+      if (cached) {
+        setFiles(cached.files)
+        setCurrentPath(cached.currentPath)
+        setRevisions(cached.revisions)
+        setSelectedRevisionId(cached.selectedRevisionId)
+        setStatus({ kind: 'ok', msg: 'Restored your last saved changes from cache.' })
+      } else {
+        setFiles(m)
+        setCurrentPath(roots[0] || 'apiproxy/SampleProxy.xml')
+        setStatus({ kind: 'ok', msg: 'New proxy skeleton created.' })
+      }
+    }
+  }, [editorSelectedProxyName, initialZipUrl, location.state?.zipUrl, searchParams])
+
+  const proxies = useMemo(() => listProxyEndpoints(files), [files])
+  const targets = useMemo(() => listTargetEndpoints(files), [files])
+  const bundleType = useMemo(() => detectBundleType(files), [files])
+
+  useEffect(() => { if (!selectedProxy) setSelectedProxy(proxies[0] || null) }, [proxies]) // eslint-disable-line
+  useEffect(() => { if (!selectedTarget) setSelectedTarget(targets[0] || null) }, [targets]) // eslint-disable-line
+
+  useEffect(() => {
+    setOpenProxyNodes(prev => { const next = { ...prev }; proxies.forEach(p => next[p] = true); return next })
+    setOpenTargetNodes(prev => { const next = { ...prev }; targets.forEach(p => next[p] = true); return next })
+  }, [proxies, targets])
+
+  useEffect(() => {
+    let bytes = 0
+    for (const [, txt] of files) bytes += new Blob([txt]).size
+    setBundleSize(fmtBytes(bytes))
+  }, [files])
+
+  const proxyEditorRef = useRef(null)
+
+  useEffect(() => {
+    if (!proxyEditorRef.current) return
+    const vars = { '--bg': '#0b0e14', '--panel': '#161b26', '--sidebar': '#0f121a', '--header': '#161b26', '--editor': '#10141f', '--text': '#e2e8f0', '--text-strong': '#ffffff', '--muted': '#94a3b8', '--border': '#2d3748', '--lane-dash': '#2d3748', '--primary': '#ff6b35', '--primary-hover': '#f25c28', '--on-primary': '#ffffff', '--chip-bg': '#1e2636', '--chip-border': '#2d3748', '--chip-hover': '#243045', '--lane-bg': '#101722', '--cond': '#fb923c' }
+    Object.entries(vars).forEach(([k, v]) => proxyEditorRef.current.style.setProperty(k, v))
+  }, [])
+
+  useEffect(() => {
+    function onDocClick(e) {
+      const el = editorWrapRef.current
+      if (el && collapseTop && !el.contains(e.target)) setCollapseTop(false)
+      if (kebabRef.current && !kebabRef.current.contains(e.target)) setMenuOpen(false)
+      if (revBtnRef.current && !revBtnRef.current.contains(e.target)) setRevMenuOpen(false)
+      if (saveBtnRef.current && !saveBtnRef.current.contains(e.target)) setSaveDropdownOpen(false)
+      if (endpointBtnRef.current && !endpointBtnRef.current.contains(e.target)) setEndpointDropdownOpen(false)
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [collapseTop])
+
+  const editorValue = files.get(currentPath) ?? ''
+  const editorLanguage = langForPath(currentPath || '')
+
+  function setFileContent(path, text) {
+    setFiles(prev => { const m = new Map(prev); m.set(path, text); return m })
+  }
+
+  function validateBundleReturnErrors(filesMap) {
+    const errors = []
+    const roots = listBundleRoot(filesMap)
+    const xmlPaths = Array.from(filesMap.keys()).filter(p => p.endsWith('.xml'))
+    const bType = detectBundleType(filesMap)
+
+    if (roots.length === 0) {
+      errors.push(`Missing ${bType === 'sharedflow' ? 'Shared Flow' : 'Proxy'} Bundle root XML`)
+    }
+    for (const p of xmlPaths) {
+      try { xmlParser.parse(filesMap.get(p) || '') } catch (e) { errors.push(`XML not well-formed: ${p} — ${e.message}`) }
+    }
+
+    if (bType === 'proxy') {
+      if (!Array.from(filesMap.keys()).some(k => k.startsWith('apiproxy/proxies/'))) errors.push('No ProxyEndpoint under apiproxy/proxies/*.xml')
+      if (!Array.from(filesMap.keys()).some(k => k.startsWith('apiproxy/targets/'))) errors.push('No TargetEndpoint under apiproxy/targets/*.xml')
+    } else {
+      // SharedFlow: ensure it has at least one sharedflow XML
+      if (!getSharedFlowMainPath(filesMap)) errors.push('No SharedFlow XML found under sharedflowbundle/sharedflows/')
+    }
+    return errors
+  }
+
+  async function exportZipFromFiles(filesMap, customName) {
+    const zip = new JSZip()
+    for (const [p, content] of filesMap) {
+      // Defensive check: avoid exporting blank default.xml in policies
+      if (p.includes('/policies/default.xml') && (!content || content.trim().length === 0)) continue
+      zip.file(p, content)
+    }
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = customName || 'apigee-proxy.zip'; a.click()
+  }
+
+  async function getZipBlobFromFiles(filesMap) {
+    const zip = new JSZip()
+    for (const [p, content] of filesMap) zip.file(p, content)
+    return zip.generateAsync({ type: 'blob' })
+  }
+
+  const PROXY_EDITOR_CACHE_PREFIX = 'proxy-editor-cache-'
+  function getProxyNameFromFiles(filesMap) {
+    const roots = listBundleRoot(filesMap)
+    const rootPath = roots[0]
+    if (!rootPath) return 'default'
+    return stripXmlExt(rootPath.split('/').pop())
+  }
+  function persistEditorCache() {
+    try {
+      const proxyName = getProxyNameFromFiles(files)
+      const key = PROXY_EDITOR_CACHE_PREFIX + proxyName
+      const filesArr = Array.from(files.entries())
+      const revisionsSer = revisions.map(r => ({
+        id: r.id,
+        name: r.name,
+        snapshot: Array.from(r.snapshot.entries())
+      }))
+      const data = {
+        proxyName,
+        files: filesArr,
+        currentPath,
+        selectedRevisionId,
+        revisions: revisionsSer,
+        savedAt: Date.now()
+      }
+      localStorage.setItem(key, JSON.stringify(data))
+    } catch (e) {
+      console.warn('proxy editor cache persist failed', e)
+    }
+  }
+  function restoreEditorCache(filesMap) {
+    const proxyName = getProxyNameFromFiles(filesMap)
+    const key = PROXY_EDITOR_CACHE_PREFIX + proxyName
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return null
+      const data = JSON.parse(raw)
+      if (!data.files || !Array.isArray(data.files)) return null
+      const restoredFiles = new Map(data.files)
+      if (restoredFiles.size === 0) return null
+      return {
+        files: restoredFiles,
+        currentPath: data.currentPath || listBundleRoot(restoredFiles)[0],
+        selectedRevisionId: data.selectedRevisionId || 'working',
+        revisions: (data.revisions || []).map(r => ({
+          id: r.id,
+          name: r.name,
+          snapshot: new Map(r.snapshot || [])
+        }))
+      }
+    } catch (e) {
+      console.warn('proxy editor cache restore failed', e)
+      return null
+    }
+  }
+
+  /* -------- Re-assess (when opened from migration: trigger after save / save to GCS) -------- */
+  async function triggerReassess() {
+    const txId = searchParams.get('transactionId')
+    const org = searchParams.get('org') || gcsConfig?.org || ''
+    const env = searchParams.get('env') || gcsConfig?.env || ''
+    const revision = searchParams.get('revision') || '2'
+    const resourceName = searchParams.get('resourceName') || getProxyNameFromFiles(files)
+    const resourceType = (searchParams.get('resourceType') || 'proxy').toLowerCase()
+    if (!txId || !resourceName || !org || !env) return
+    const company = searchParams.get('company') || (typeof localStorage !== 'undefined' && localStorage.getItem('companyName')) || 'probestack'
+    const basePayload = {
+      company,
+      org,
+      env,
+      proxies: [],
+      sharedFlows: [],
+      targetServers: [],
+      kvms: [],
+      apiProducts: [],
+      apps: [],
+      caches: [],
+      developers: [],
+    }
+    const apiField = resourceType === 'shared_flow' ? 'sharedFlows' : 'proxies'
+    basePayload[apiField] = [resourceName]
+    const assessmentResourceType = resourceType === 'shared_flow' ? 'shared_flow' : 'proxy'
+    const payload = {
+      ...basePayload,
+      requestTransactionId: txId,
+      revision,
+      userEmail: (typeof localStorage !== 'undefined' && localStorage.getItem('userEmail')) || 'admin@probestack.io',
+      requestSource: 'UI-Reassess',
+      assessmentResourceType,
+    }
+    const companyName = (typeof localStorage !== 'undefined' && localStorage.getItem('companyName')) || 'probestack'
+    try {
+      const res = await fetch(`${ASSESSMENT_BASE}/apigee/reassessment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'X-Partner-Id': companyName.toLowerCase()
+        },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const errBody = await res.text()
+        let errMsg = res.statusText
+        try { const j = JSON.parse(errBody); errMsg = j.message || j.error || errMsg } catch (_) { errMsg = errBody || errMsg }
+        setStatus(s => s.kind === 'ok' ? { kind: 'warn', msg: `Re-assess failed: ${errMsg}` } : s)
+      }
+    } catch (e) {
+      setStatus(s => s.kind === 'ok' ? { kind: 'warn', msg: `Re-assess failed: ${e?.message || e}` } : s)
+    }
+  }
+
+  /* -------- Revisions -------- */
+  function snapshotFiles(map) { return new Map(map) }
+  function nextRevisionName() {
+    const n = revisions.length + 1
+    const ts = new Date().toLocaleString()
+    return `${n} – ${ts}`
+  }
+  function onSaveRevision() {
+    const errs = validateBundleReturnErrors(files)
+    if (errs.length) { setStatus({ kind: 'err', msg: `Cannot save. ${errs.length} issue(s):\n• ` + errs.join('\n• ') }); return }
+    const rev = { id: String(Date.now()), name: nextRevisionName(), snapshot: snapshotFiles(files) }
+    setRevisions(prev => [rev, ...prev]); setSelectedRevisionId(rev.id)
+    persistEditorCache()
+    setStatus({ kind: 'ok', msg: `Saved ${rev.name} (and cached locally).` })
+    triggerReassess()
+  }
+  function onSelectRevision(id) {
+    if (id === 'working') { setSelectedRevisionId('working'); return }
+    const rev = revisions.find(r => r.id === id); if (!rev) return
+    setFiles(snapshotFiles(rev.snapshot)); setSelectedRevisionId(id); setStatus({ kind: 'ok', msg: `Loaded ${rev.name}` })
+  }
+
+  /* -------- Import / Export -------- */
+  async function onExportSelectedRevision() {
+    let filesToExport = files
+    let name = 'proxy-working.zip'
+    if (selectedRevisionId !== 'working') {
+      const rev = revisions.find(r => r.id === selectedRevisionId)
+      if (rev?.snapshot) { filesToExport = rev.snapshot; name = `proxy-${rev.name.replace(/\s+/g, '_')}.zip` }
+    }
+    await exportZipFromFiles(filesToExport, name)
+    setStatus({ kind: 'ok', msg: 'Exported revision.' })
+  }
+
+  /* -------- Deploy modal -------- */
+  const revOptions = [{ id: 'working', name: '-' }, ...revisions]
+  const selectedRev = revOptions.find(r => r.id === (deployDlg.revId || selectedRevisionId)) || revOptions[0]
+  function DeployModal() {
+    if (!deployDlg.open) return null
+    return (
+      <div role="dialog" aria-modal="true"
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+        onClick={() => setDeployDlg(s => ({ ...s, open: false, phase: 'idle' }))}
+      >
+        <div onClick={(e) => e.stopPropagation()}
+          style={{ width: 520, maxWidth: '94vw', background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, position: 'relative' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <strong>Deploy Confirmation</strong>
+            <button onClick={() => setDeployDlg(s => ({ ...s, open: false, phase: 'idle' }))}
+              style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
+          </div>
+          {deployDlg.phase === 'success' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, border: '1px solid var(--border)', borderRadius: 8, marginBottom: 12, background: 'var(--lane-bg)' }}>
+              <span aria-hidden style={{ fontSize: 18 }}>✅</span>
+              <div>
+                <div style={{ fontWeight: 600 }}>Deployment succeeded</div>
+                <div style={{ opacity: .85, fontSize: 13 }}>
+                  Deployed to <b>{deployDlg.org}</b> / <b>{deployDlg.env}</b> from <b>{selectedRev.name}</b>.
+                </div>
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: 10, opacity: deployDlg.phase === 'success' ? 0.6 : 1 }}>
+
+            <div style={{ display: 'flex', gap: '32px', marginBottom: '8px', padding: '12px', background: 'var(--main-bg)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontSize: 12, opacity: .7, marginBottom: 4 }}>Apigee X Organization</div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{deployDlg.org || 'N/A'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, opacity: .7, marginBottom: 4 }}>Apigee X Environment</div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{deployDlg.env || 'N/A'}</div>
+              </div>
+            </div>
+
+            <label style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 12, opacity: .8 }}>Revision to deploy</span>
+              <select
+                value={deployDlg.revId}
+                onChange={(e) => setDeployDlg(s => ({ ...s, revId: e.target.value }))}
+                disabled={deployDlg.phase === 'deploying' || deployDlg.phase === 'success'}
+                style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}
+              >
+                <option value="working">-</option>
+                {revisions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+            <button
+              onClick={() => setDeployDlg(s => ({ ...s, open: false, phase: 'idle' }))}
+              disabled={deployDlg.phase === 'deploying'}
+              style={{ padding: '10px 14px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8, cursor: 'pointer' }}
+            >{deployDlg.phase === 'success' ? 'Close' : 'Cancel'}</button>
+            <button
+              onClick={async () => {
+                if (deployDlg.phase === 'deploying') return
+                const edgeOrg = searchParams.get('org') || gcsConfig?.org || 'my-org'
+                const edgeEnv = searchParams.get('env') || gcsConfig?.env || 'test'
+                const xOrg = deployDlg.org?.trim() || 'my-org'
+                const xEnv = deployDlg.env?.trim() || 'test'
+
+                let filesToDeploy = files
+                let revName = '-'
+                let deployedRevisionId = deployDlg.revId
+                if (deployDlg.revId !== 'working') {
+                  const rev = revisions.find(r => r.id === deployDlg.revId)
+                  if (rev?.snapshot) { filesToDeploy = rev.snapshot; revName = rev.name }
+                }
+
+                setDeployDlg(s => ({ ...s, phase: 'deploying' }))
+                try {
+                  // 1. Upload bundle to GCS
+                  const bucketName = (gcsConfig?.bucketName || gcsConfig?.profileId || '').trim() || searchParams.get('company')
+                  const companyName = searchParams.get('company') || (typeof localStorage !== 'undefined' && localStorage.getItem('companyName')) || 'probestack'
+                  const uploadType = bundleType === 'sharedflow' ? 'sharedflow' : 'proxy'
+                  const resourceName = getProxyNameFromFiles(filesToDeploy)
+
+                  const zipBlob = await getZipBlobFromFiles(filesToDeploy)
+                  const formData = new FormData()
+                  formData.append('file', zipBlob, `${resourceName}.zip`)
+                  formData.append('company', companyName)
+                  formData.append('org', edgeOrg)  // Source Edge Org
+                  formData.append('env', edgeEnv)  // Source Edge Env
+                  formData.append('type', uploadType)
+                  formData.append('resourceName', resourceName)
+
+                  const uploadRes = await fetch(`${ASSESSMENT_BASE}/apigee/bundles/upload`, {
+                    method: 'POST',
+                    headers: {
+                      Accept: 'application/json',
+                      'X-Partner-Id': companyName.toLowerCase()
+                    },
+                    body: formData
+                  })
+                  if (!uploadRes.ok) throw new Error('Failed to upload bundle to GCS')
+
+                  // 2. Call Migration API
+                  const userEmail = typeof localStorage !== 'undefined' ? localStorage.getItem('userEmail') : 'admin@probestack.io'
+                  const reqTxId = searchParams.get('transactionId') || String(Date.now())
+                  const reqRev = searchParams.get('revision') || '1'
+
+                  const migrationPayload = {
+                    apigeeEdgeOrg: edgeOrg,
+                    apigeeEdgeEnv: edgeEnv,
+                    apigeeXOrg: xOrg,
+                    apigeeXEnv: xEnv,
+                    userEmail,
+                    companyName,
+                    envClassification: xEnv, // Target classification
+                    requestTransactionId: reqTxId,
+                    requestSource: "UI",
+                    revision: reqRev,
+                  }
+
+                  if (uploadType === 'shared_flow' || uploadType === 'sharedflow') {
+                    migrationPayload.sharedflows = [resourceName];
+                  } else {
+                    migrationPayload.proxies = [resourceName];
+                  }
+
+                  const migEndpoint = `${MIGRATION_BASE}/apigee/${(uploadType === 'shared_flow' || uploadType === 'sharedflow') ? 'sharedflows' : 'proxies'}`
+                  const migRes = await axios.post(migEndpoint, migrationPayload, {
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    timeout: 60000
+                  })
+
+                  // Check if migration succeeded
+                  let migrationSuccess = false
+                  const migDetails = migRes.data?.migrationDetails || migRes.data?.sharedflowDetails || []
+                  const resDetail = migDetails.find(r => r.resourceName === resourceName)
+                  if (resDetail?.success === true || (resDetail?.status && ['success', 'completed', 'complete'].includes(String(resDetail.status).toLowerCase()))) {
+                    migrationSuccess = true
+                  }
+                  if (!migrationSuccess && migRes.data?.status !== 'SUCCESS') {
+                    throw new Error(resDetail?.message || resDetail?.errorMessage || 'Migration failed')
+                  }
+
+                  // 3. Call Deploy API
+                  const deployPayload = {
+                    orgName: edgeOrg, // Source Edge Org
+                    environment: edgeEnv, // Source Edge Env
+                    companyName,
+                    requestTransactionId: reqTxId,
+                    requestRevision: reqRev,
+                    deployType: "apigee_x_management_workflow",
+                    apigeeXOrganization: xOrg, // Target Apigee X Org
+                    apigeeXEnvironment: xEnv, // Target Apigee X Env
+                    resourceType: (uploadType === 'shared_flow' || uploadType === 'sharedflow') ? "sharedflow" : uploadType,
+                    userEmail,
+                    resources: [{ resourceName, revision: "1" }]
+                  }
+
+                  const depEndpoint = `${DEPLOYMENTS_BASE}/apigee`
+                  const depRes = await axios.post(depEndpoint, deployPayload, {
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    timeout: 60000
+                  })
+
+                  let deploymentSuccess = false
+                  if (depRes.data?.resourceResponse && Array.isArray(depRes.data.resourceResponse)) {
+                    const deployResult = depRes.data.resourceResponse[0]
+                    deploymentSuccess = ['success', 'deployed'].includes((deployResult?.status || 'FAILED').toLowerCase())
+                  } else if (depRes.status === 200) {
+                    deploymentSuccess = true
+                  }
+
+                  if (!deploymentSuccess) {
+                    throw new Error('Deployment failed')
+                  }
+
+                  if (deployDlg.revId === 'working') {
+                    const newRev = { id: String(Date.now()), name: withEnvTag(nextRevisionName(), xEnv), snapshot: snapshotFiles(files) }
+                    setRevisions(prev => [newRev, ...prev])
+                    setSelectedRevisionId(newRev.id)
+                    deployedRevisionId = newRev.id
+                  } else {
+                    setRevisions(prev => prev.map(r => r.id === deployDlg.revId ? { ...r, name: withEnvTag(r.name, xEnv) } : r))
+                  }
+                  setStatus({ kind: 'ok', msg: `Deployed successfully to Apigee X "${xOrg}" / "${xEnv}" from ${revName}.` })
+                  setDeployDlg(s => ({ ...s, phase: 'success', revId: deployedRevisionId }))
+
+                  // Notify parent window of successful deployment
+                  if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'PROXY_EDITOR_DEPLOY_SUCCESS', resourceName, resourceType: uploadType }, '*')
+                  }
+                } catch (e) {
+                  setStatus({ kind: 'err', msg: `Deployment process failed: ${e?.message || e}` })
+                  setDeployDlg(s => ({ ...s, phase: 'idle' }))
+                }
+              }}
+              className="primary"
+              disabled={deployDlg.phase === 'deploying' || deployDlg.phase === 'success'}
+              style={{ padding: '10px 16px', borderRadius: 8, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}
+            >
+              {deployDlg.phase === 'deploying' && <Spinner />}
+              {deployDlg.phase === 'deploying' ? 'Deploying…' : (deployDlg.phase === 'success' ? 'Deployed' : 'Deploy')}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  async function onImportZip(file) {
+    try {
+      const zip = await JSZip.loadAsync(file)
+      const newFiles = new Map()
+      await Promise.all(Object.keys(zip.files).map(async (origPath) => {
+        const e = zip.files[origPath]; if (e.dir) return
+        const iApi = origPath.indexOf('apiproxy/')
+        const iSf = origPath.indexOf('sharedflowbundle/')
+        const path = iApi !== -1 ? origPath.slice(iApi) : iSf !== -1 ? origPath.slice(iSf) : null
+        if (!path) return
+        const text = await e.async('string'); newFiles.set(path, text)
+      }))
+      if (newFiles.size === 0) throw new Error('No files under apiproxy/ or sharedflowbundle/')
+      setFiles(newFiles)
+      const roots = listBundleRoot(newFiles)
+      const sfMain = getSharedFlowMainPath(newFiles)
+      const openPath = roots[0]
+        || sfMain
+        || Array.from(newFiles.keys()).find(p => p.startsWith('apiproxy/proxies/') && p.endsWith('.xml'))
+        || Array.from(newFiles.keys())[0]
+      setCurrentPath(openPath)
+      setSelectedRevisionId('working')
+      setStatus({ kind: 'ok', msg: 'Imported proxy bundle.' })
+    } catch (e) {
+      setStatus({ kind: 'err', msg: `Import failed: ${e.message}` })
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  /* -------- OpenAPI Import -------- */
+  async function onImportOpenAPI(file) {
+    try {
+      const text = await file.text()
+      let spec
+      try {
+        spec = yaml.load(text) // handles YAML & JSON
+      } catch {
+        spec = JSON.parse(text)
+      }
+      if (!spec || (!spec.openapi && !spec.swagger)) throw new Error('Not an OpenAPI/Swagger document')
+
+      const generated = generateApigeeBundleFromOAS(spec)
+      const next = new Map(Object.entries(generated))
+      setFiles(next)
+
+      const roots = listBundleRoot(next)
+      const openPath = roots[0]
+        || Array.from(next.keys()).find(p => p.startsWith('apiproxy/proxies/') && p.endsWith('.xml'))
+        || Array.from(next.keys())[0]
+      setCurrentPath(openPath)
+      setSelectedRevisionId('working')
+      setStatus({ kind: 'ok', msg: `Imported OpenAPI and generated proxy "${stripXmlExt(roots[0]?.split('/').pop() || 'APIProxy')}".` })
+    } catch (e) {
+      setStatus({ kind: 'err', msg: `OpenAPI import failed: ${e.message}` })
+    }
+  }
+
+  // --- OpenAPI -> Apigee generator ---
+  function generateApigeeBundleFromOAS(oas) {
+    const apiName =
+      oas.info?.title?.replace(/[^\w.-]+/g, '-')?.slice(0, 60) ||
+      'OpenAPI-Proxy'
+
+    // BasePath + Target URL
+    let basePath = '/v1'
+    let targetUrl = 'https://httpbin.org/anything'
+    if (oas.servers?.length) {
+      try {
+        const first = oas.servers[0]?.url || ''
+        // Use URL if absolute; else just take pathname-ish
+        try {
+          const u = new URL(first)
+          basePath = u.pathname && u.pathname !== '/' ? u.pathname : '/v1'
+          targetUrl = first
+        } catch {
+          // relative server like "/api"
+          basePath = first || '/v1'
+        }
+      } catch { }
+    } else if (oas.host) {
+      const scheme = (oas.schemes && oas.schemes[0]) || 'https'
+      const bp = oas.basePath || '/v1'
+      targetUrl = `${scheme}://${oas.host}${bp}`
+      basePath = bp
+    }
+
+    // Flows
+    const flowsXml = []
+    const policySet = new Set()
+    const verbs = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'trace']
+    const paths = oas.paths || {}
+
+    Object.entries(paths).forEach(([pathKey, ops]) => {
+      verbs.forEach(v => {
+        if (!ops[v]) return
+        const flowName = makeFlowName(pathKey, v)
+        const cond = `(proxy.pathsuffix MatchesPath "${pathKey}") and (request.verb = "${v.toUpperCase()}")`
+
+        // security mapping (very basic)
+        const sec = ops[v].security ?? oas.security
+        if (Array.isArray(sec) && sec.length) {
+          const schemes = oas.components?.securitySchemes || {}
+          Object.keys(schemes).forEach(key => {
+            const s = schemes[key]
+            if (!s) return
+            if ((s.type === 'apiKey') && sec.some(x => x[key] !== undefined)) policySet.add('Verify-API-Key')
+            if ((s.type === 'oauth2') && sec.some(x => x[key] !== undefined)) policySet.add('OAuthV2-Policy')
+          })
+        }
+
+        flowsXml.push(flowXmlBlock({
+          name: flowName,
+          condition: cond,
+          requestSteps: [],
+          responseSteps: []
+        }))
+      })
+    })
+
+    const proxyXml = `<?xml version="1.0" encoding="UTF-8"?>
+<ProxyEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request>
+${Array.from(policySet).map(n => `      <Step><Name>${n}</Name></Step>`).join('\n')}
+    </Request>
+    <Response/>
+  </PreFlow>
+  <PostFlow name="PostFlow">
+    <Request/>
+    <Response/>
+  </PostFlow>
+  <HTTPProxyConnection>
+    <BasePath>${basePath || '/v1'}</BasePath>
+    <VirtualHost>default</VirtualHost>
+  </HTTPProxyConnection>
+  <Flows>
+${flowsXml.join('\n')}
+  </Flows>
+  <RouteRule name="to-default"><TargetEndpoint>default</TargetEndpoint></RouteRule>
+</ProxyEndpoint>
+`
+
+    const targetXml = `<?xml version="1.0" encoding="UTF-8"?>
+<TargetEndpoint name="default">
+  <PreFlow name="PreFlow">
+    <Request/>
+    <Response/>
+  </PreFlow>
+  <PostFlow name="PostFlow">
+    <Request/>
+    <Response/>
+  </PostFlow>
+  <HTTPTargetConnection><URL>${targetUrl}</URL></HTTPTargetConnection>
+</TargetEndpoint>
+`
+
+    const rootXml = `<?xml version="1.0" encoding="UTF-8"?>
+<APIProxy name="${apiName}">
+  <DisplayName>${escapeXml(oas.info?.title || apiName)}</DisplayName>
+  <Description>${escapeXml(oas.info?.description || 'Generated from OpenAPI')}</Description>
+  <TargetEndpoints><TargetEndpoint>default</TargetEndpoint></TargetEndpoints>
+  <ProxyEndpoints><ProxyEndpoint>default</ProxyEndpoint></ProxyEndpoints>
+  <Policies>
+${Array.from(policySet).map(n => `    <Policy>${n}</Policy>`).join('\n') || '    <Policy>Verify-API-Key</Policy>'}
+  </Policies>
+</APIProxy>
+`
+
+    // minimal policies
+    const policies = {}
+    if (policySet.has('Verify-API-Key')) {
+      policies['apiproxy/policies/Verify-API-Key.xml'] = `<?xml version="1.0" encoding="UTF-8"?>
+<VerifyAPIKey name="Verify-API-Key">
+  <DisplayName>Verify-API-Key</DisplayName>
+  <APIKey ref="request.queryparam.apikey"/>
+</VerifyAPIKey>`
+    }
+    if (policySet.has('OAuthV2-Policy')) {
+      policies['apiproxy/policies/OAuthV2-Policy.xml'] = `<?xml version="1.0" encoding="UTF-8"?>
+<OAuthV2 name="OAuthV2-Policy">
+  <Operation>VerifyAccessToken</Operation>
+</OAuthV2>`
+    }
+
+    const out = {
+      [`apiproxy/${apiName}.xml`]: rootXml,
+      'apiproxy/proxies/default.xml': proxyXml,
+      'apiproxy/targets/default.xml': targetXml,
+      'apiproxy/resources/openapi/oas.json': JSON.stringify(oas, null, 2),
+    }
+    Object.assign(out, policies)
+    return out
+  }
+
+  function makeFlowName(pathKey, verb) {
+    const clean = (pathKey || '')
+      .replace(/^\/+/, '')
+      .replace(/[{}]/g, '')
+      .replace(/[^\w.-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'root'
+    return `${clean}-${verb.toUpperCase()}`
+  }
+
+  function escapeXml(s = '') {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;')
+  }
+
+  /* -------- Pre/Post policy lane handlers -------- */
+  function currentEndpointPath() {
+    if (flowSide === 'proxy') return selectedProxy || listProxyEndpoints(files)[0] || null
+    return selectedTarget || listTargetEndpoints(files)[0] || null
+  }
+  function getProxyPath() { return selectedProxy || listProxyEndpoints(files)[0] || null }
+  function getTargetPath() { return selectedTarget || listTargetEndpoints(files)[0] || null }
+  function addPolicyToSection(section, policy, endp = null) {
+    const endpRes = endp != null ? endp : currentEndpointPath(); if (!endpRes) { setStatus({ kind: 'err', msg: `No endpoint found.` }); return }
+    const xml = files.get(endpRes) || ''
+    const curr = parseSteps(xml, section)
+    if (!curr.includes(policy)) curr.push(policy)
+    const newXml = replaceSection(xml, section, curr)
+    const m = new Map(files); m.set(endpRes, newXml); setFiles(m); setCurrentPath(endpRes)
+    setStatus({ kind: 'ok', msg: `Added ${policy} to ${section.replace('-', ' ')}` })
+  }
+  function onLaneDrop(section, e, endp = null) { e.preventDefault(); const policy = e.dataTransfer.getData('text/plain'); if (policy) addPolicyToSection(section, policy, endp) }
+  function removeStep(section, policy, endp = null) {
+    const endpRes = endp != null ? endp : currentEndpointPath(); if (!endpRes) return
+    const xml = files.get(endpRes) || ''
+    const curr = parseSteps(xml, section).filter(n => n !== policy)
+    const newXml = replaceSection(xml, section, curr)
+    const m = new Map(files); m.set(endpRes, newXml); setFiles(m); setCurrentPath(endpRes)
+    setStatus({ kind: 'ok', msg: `Removed ${policy} from ${section.replace('-', ' ')}` })
+  }
+
+  /* -------- Flow add/edit/delete/reorder; attach steps -------- */
+  const [flowDlg, setFlowDlg] = useState({ open: false, mode: 'add', proxyPath: null, originalName: '', name: '', path: '/example', verb: 'ANY', advanced: false, condition: '' })
+  function listFlowsForProxy(p) { return getFlowBlocks(files.get(p) || '') }
+  function computeCondition(path, verb) { const base = `(proxy.pathsuffix MatchesPath "${path || '/'})`; return (!verb || verb === 'ANY') ? base : `${base} and (request.verb = "${verb}")` }
+
+  function openAddFlowDialog(proxyPath) {
+    setFlowDlg({ open: true, mode: 'add', proxyPath, originalName: '', name: 'New Flow', path: '/example', verb: 'ANY', advanced: false, condition: '' })
+  }
+  function openEditFlowDialog(proxyPath, flow) {
+    let verb = 'ANY', path = '/'
+    const mPath = flow.condition?.match(/MatchesPath\s+"([^"]+)"/i); if (mPath) path = mPath[1]
+    const mVerb = flow.condition?.match(/request\.verb\s*=\s*"([A-Z]+)"/i); if (mVerb) verb = mVerb[1]
+    setFlowDlg({ open: true, mode: 'edit', proxyPath, originalName: flow.name, name: flow.name, path, verb, advanced: !!flow.condition && !(mPath && mVerb), condition: flow.condition || '' })
+  }
+  function closeFlowDialog() { setFlowDlg(s => ({ ...s, open: false })) }
+  function onSaveFlow() {
+    const proxyPath = flowDlg.proxyPath; if (!proxyPath) return
+    const xml = files.get(proxyPath) || ''
+    const condition = flowDlg.advanced ? (flowDlg.condition || '') : computeCondition(flowDlg.path, flowDlg.verb)
+    let req = [], res = []
+    if (flowDlg.mode === 'edit') {
+      const blocks = getFlowBlocks(xml)
+      const b = blocks.find(x => x.name === flowDlg.originalName)
+      if (b) { req = b.requestSteps; res = b.responseSteps }
+    }
+    const updated = upsertFlowInProxyXml(xml, { originalName: flowDlg.mode === 'edit' ? flowDlg.originalName : undefined, name: flowDlg.name, condition, requestSteps: req, responseSteps: res })
+    const m = new Map(files); m.set(proxyPath, updated); setFiles(m); setCurrentPath(proxyPath)
+    closeFlowDialog()
+    setStatus({ kind: 'ok', msg: `Flow ${flowDlg.mode === 'edit' ? 'updated' : 'added'}: ${flowDlg.name}` })
+  }
+  function onDeleteFlow(proxyPath, name) {
+    const xml = files.get(proxyPath) || ''
+    const updated = deleteFlowFromProxyXml(xml, name)
+    const m = new Map(files); m.set(proxyPath, updated); setFiles(m); setCurrentPath(proxyPath)
+    setStatus({ kind: 'ok', msg: `Flow deleted: ${name}` })
+  }
+  function onFlowDragStart(e, proxyPath, fromIdx) { e.dataTransfer.setData('text/flow', JSON.stringify({ proxyPath, fromIdx })); e.dataTransfer.effectAllowed = 'move' }
+  function onFlowDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }
+  function onFlowDrop(e, proxyPath, toIdx) {
+    e.preventDefault()
+    const raw = e.dataTransfer.getData('text/flow'); if (!raw) return
+    const { proxyPath: src, fromIdx } = JSON.parse(raw)
+    if (src !== proxyPath) return
+    const xml = files.get(proxyPath) || ''
+    const blocks = getFlowBlocks(xml)
+    if (!blocks.length) return
+    const list = blocks.map(b => b.block)
+    const [moved] = list.splice(fromIdx, 1)
+    list.splice(toIdx, 0, moved)
+    const newXml = xmlFromBlocks(xml, list)
+    const m = new Map(files); m.set(proxyPath, newXml); setFiles(m); setCurrentPath(proxyPath)
+    setStatus({ kind: 'ok', msg: `Reordered flows (moved ${fromIdx + 1} → ${toIdx + 1})` })
+  }
+  function onFlowLaneDrop(proxyPath, flowName, which, e) {
+    e.preventDefault(); const policy = e.dataTransfer.getData('text/plain'); if (!policy) return
+    const xml = files.get(proxyPath) || ''; const updated = addPolicyToFlow(xml, flowName, which, policy)
+    const m = new Map(files); m.set(proxyPath, updated); setFiles(m); setCurrentPath(proxyPath)
+    setStatus({ kind: 'ok', msg: `Added ${policy} to Flow "${flowName}" ${which}` })
+  }
+  function removeFlowStep(proxyPath, flowName, which, policy) {
+    const xml = files.get(proxyPath) || ''; const updated = removePolicyFromFlow(xml, flowName, which, policy)
+    const m = new Map(files); m.set(proxyPath, updated); setFiles(m); setCurrentPath(proxyPath)
+    setStatus({ kind: 'ok', msg: `Removed ${policy} from Flow "${flowName}" ${which}` })
+  }
+
+  function addPolicyToSharedFlow(policyName) {
+    const sfPath = getSharedFlowMainPath(files)
+    if (!sfPath) return
+    const xml = files.get(sfPath) || ''
+    if (xml.includes(`<Name>${policyName}</Name>`)) return
+    const newStep = `
+    <Step>
+      <Name>${policyName}</Name>
+    </Step>
+  `
+    const newXml = xml.replace(/<\/SharedFlow>/i, `${newStep}</SharedFlow>`)
+    setFiles(prev => { const m = new Map(prev); m.set(sfPath, newXml); return m })
+    setStatus({ kind: 'ok', msg: `Added ${policyName} to SharedFlow` })
+  }
+
+  function removePolicyFromSharedFlow(policyName) {
+    const sfPath = getSharedFlowMainPath(files)
+    if (!sfPath) {
+      setStatus({ kind: 'err', msg: 'SharedFlow main XML not found under sharedflowbundle/sharedflows/*.xml' })
+      return
+    }
+    const xml = files.get(sfPath) || ''
+    const updatedXml = removeSharedFlowStep(xml, policyName)
+    setFiles(prev => { const m = new Map(prev); m.set(sfPath, updatedXml); return m })
+    setCurrentPath(sfPath)
+    setStatus({ kind: 'ok', msg: `Removed ${policyName} from SharedFlow` })
+  }
+
+  /* -------- Simple policy creator (inline) -------- */
+  const firstType = Object.values(POLICY_CATALOG)[0][0].key
+  const [policyDlg, setPolicyDlg] = useState({ open: false, type: firstType, name: `${getPolicyPrefix(firstType)}-`, mode: 'apigee' })
+  const [kongPlugins, setKongPlugins] = useState([])
+  const [loadingKongPlugins, setLoadingKongPlugins] = useState(false)
+
+  // Get target gateway from localStorage (set in migration wizard)
+  const targetGateway = localStorage.getItem('migrationTargetGateway') || ''
+  const isKongKonnect = targetGateway.toLowerCase().includes('kong konnect')
+
+  function openPolicyDialog(context = null) {
+    setPolicyAttach(context)
+    const defaultType = Object.values(POLICY_CATALOG)[0][0].key
+    const defaultName = `${getPolicyPrefix(defaultType)}-`
+    setPolicyDlg({ open: true, type: defaultType, name: defaultName, mode: 'apigee' })
+
+    // Fetch Kong plugins if Kong Konnect is selected
+    if (isKongKonnect && kongPlugins.length === 0) {
+      fetchKongPlugins()
+    }
+
+    setTimeout(() => { try { policyNameRef.current?.focus(); policyNameRef.current?.select() } catch { } }, 0)
+  }
+
+  async function fetchKongPlugins() {
+    setLoadingKongPlugins(true)
+    try {
+      const kongEndpoint = 'https://forgesphere.probestack.io/kong-wrapper/v2/control-planes/9ed3fe7b-7454-43fb-89bf-8b01072094fb/core-entities/plugins?region=in'
+      const response = await axios.get(kongEndpoint)
+
+      // Extract unique plugin names
+      const plugins = response.data?.data || []
+      const uniqueNames = [...new Set(plugins.map(p => p.name).filter(Boolean))].sort()
+      setKongPlugins(uniqueNames)
+    } catch (error) {
+      console.error('Error fetching Kong plugins:', error)
+      setKongPlugins([])
+    } finally {
+      setLoadingKongPlugins(false)
+    }
+  }
+  function handlePolicyNameInput(e) {
+    const raw = e.target.value ?? ''
+    const pref = `${getPolicyPrefix(policyDlg.type)}-`
+    const stripped = raw.replace(new RegExp(`^(${pref})?[-_\\s]*`, 'i'), '')
+    const val = pref + stripped
+    setPolicyDlg(s => ({ ...s, name: val }))
+  }
+  async function ensurePolicyFileExists(typeKey, policyName, { forSharedFlow } = {}) {
+    const policyPath = forSharedFlow
+      ? (getSharedFlowPoliciesPrefix(files) || apiproxyRoot + 'policies/') + policyName + '.xml'
+      : `${apiproxyRoot}policies/${policyName}.xml`
+    if (files.has(policyPath)) return { policyPath }
+    const xml = MINIMAL_POLICY_XML(typeKey, policyName)
+    setFiles(prev => { const m = new Map(prev); m.set(policyPath, xml); return m })
+    return { policyPath }
+  }
+  async function onCreatePolicy() {
+    const name = (policyDlg.name || '').trim()
+    if (!name) { setPolicyDlg(s => ({ ...s, open: false })); setPolicyAttach(null); return }
+    if (policyAttach?.section === 'sharedflow') {
+      await ensurePolicyFileExists(policyDlg.type, name, { forSharedFlow: true })
+      const sfMain = getSharedFlowMainPath(files)
+      if (sfMain) {
+        setFiles(prev => {
+          const m = new Map(prev)
+          if (!m.has(sfMain)) return m
+          const xml = m.get(sfMain) || ''
+          m.set(sfMain, addPolicyStepToSharedFlowXml(xml, name))
+          return m
+        })
+        setCurrentPath(sfMain)
+      }
+      setStatus({ kind: 'ok', msg: `Policy "${name}" created and added to SharedFlow` })
+      setPolicyDlg(s => ({ ...s, open: false }))
+      setPolicyAttach(null)
+      return
+    }
+    await ensurePolicyFileExists(policyDlg.type, name)
+    if (policyAttach?.section && policyAttach?.endpoint) {
+      const endp = policyAttach.endpoint
+      const xml = files.get(endp) || ''
+      const curr = parseSteps(xml, policyAttach.section)
+      if (!curr.includes(name)) curr.push(name)
+      const newXml = replaceSection(xml, policyAttach.section, curr)
+      setFiles(prev => { const m = new Map(prev); m.set(endp, newXml); return m })
+      setCurrentPath(endp)
+      setStatus({ kind: 'ok', msg: `Policy "${name}" created and added to ${policyAttach.section.replace('-', ' ')}` })
+    } else {
+      setStatus({ kind: 'ok', msg: `Policy created: ${name}` })
+    }
+    setPolicyDlg(s => ({ ...s, open: false }))
+    setPolicyAttach(null)
+  }
+
+  function onDeletePolicy(policyPath) {
+    const policyName = policyPath.split('/').pop().replace(/\.xml$/, '')
+    const ok = window.confirm(`Delete policy "${policyName}"? This will also remove it from any flows.`)
+    if (!ok) return
+
+    setFiles(prev => {
+      const m = new Map(prev)
+      m.delete(policyPath)
+
+      // Cleanup references in other files
+      const currentRoots = listBundleRoot(m)
+      const currentSfMain = getSharedFlowMainPath(m)
+
+      m.forEach((content, path) => {
+        if (!path.endsWith('.xml')) return
+        let updated = content
+
+        if (path.includes('/proxies/') || path.includes('/targets/')) {
+          updated = removePolicyFromXml(updated, policyName)
+        } else if (path.includes('/sharedflows/')) {
+          updated = removeSharedFlowStep(updated, policyName)
+        }
+
+        // Also check if it's the main bundle XML
+        const isMainXml = currentRoots.includes(path) || path === currentSfMain
+        if (isMainXml) {
+          updated = removePolicyFromMainXml(updated, policyName)
+        }
+
+        if (updated !== content) {
+          m.set(path, updated)
+        }
+      })
+
+      return m
+    })
+
+    if (currentPath === policyPath) {
+      setCurrentPath(roots[0] || 'apiproxy/SampleProxy.xml')
+    }
+
+    setStatus({ kind: 'ok', msg: `Policy "${policyName}" deleted and removed from flows.` })
+  }
+
+  function onDeleteProxyEndpoint(proxyPath) {
+    const list = listProxyEndpoints(files)
+    if (list.length <= 1) {
+      setStatus({ kind: 'err', msg: 'At least one proxy endpoint is required.' })
+      return
+    }
+    const name = proxyPath.split('/').pop().replace(/\.xml$/, '')
+    if (!window.confirm(`Delete proxy endpoint "${name}"?`)) return
+    const restProxies = list.filter(x => x !== proxyPath)
+    const roots = listBundleRoot(files)
+    setFiles(prev => { const m = new Map(prev); m.delete(proxyPath); return m })
+    if (currentPath === proxyPath || selectedProxy === proxyPath) {
+      setSelectedProxy(restProxies[0] || null)
+      setCurrentPath(restProxies[0] || roots[0] || '')
+      if (restProxies[0]) setFlowSide('proxy')
+    }
+    setStatus({ kind: 'ok', msg: `Proxy endpoint "${name}" deleted.` })
+  }
+
+  function onDeleteTargetEndpoint(targetPath) {
+    const list = listTargetEndpoints(files)
+    if (list.length <= 1) {
+      setStatus({ kind: 'err', msg: 'At least one target endpoint is required.' })
+      return
+    }
+    const name = targetPath.split('/').pop().replace(/\.xml$/, '')
+    if (!window.confirm(`Delete target endpoint "${name}"?`)) return
+    const restTargets = list.filter(x => x !== targetPath)
+    const roots = listBundleRoot(files)
+    setFiles(prev => { const m = new Map(prev); m.delete(targetPath); return m })
+    if (currentPath === targetPath || selectedTarget === targetPath) {
+      setSelectedTarget(restTargets[0] || null)
+      setCurrentPath(restTargets[0] || roots[0] || '')
+      if (restTargets[0]) setFlowSide('target')
+    }
+    setStatus({ kind: 'ok', msg: `Target endpoint "${name}" deleted.` })
+  }
+
+  function onDeleteResource(resourcePath) {
+    const name = resourcePath.split('/').pop()
+    if (!window.confirm(`Delete resource "${name}"?`)) return
+    const roots = listBundleRoot(files)
+    setFiles(prev => { const m = new Map(prev); m.delete(resourcePath); return m })
+    if (currentPath === resourcePath) {
+      setCurrentPath(roots[0] || '')
+    }
+    setStatus({ kind: 'ok', msg: `Resource "${name}" deleted.` })
+  }
+
+  /* -------- Save to GCS: POST /apigee/bundles/upload (multipart/form-data) -------- */
+  const BUNDLES_UPLOAD_URL = ASSESSMENT_BASE + '/apigee/bundles/upload'
+
+  async function handleSaveToGcs() {
+    const org = (gcsConfig?.org || '').trim() || 'my-organization'
+    const env = (gcsConfig?.env || '').trim() || 'prod'
+    const bucketName = (gcsConfig?.bucketName || gcsConfig?.profileId || '').trim()
+    if (!bucketName) {
+      setStatus({ kind: 'err', msg: 'No GCS bucket configured. Add a Google Cloud Storage profile in Configurations > Google Cloud Storage.' })
+      return
+    }
+    let filesToUpload = files
+    if (selectedRevisionId && selectedRevisionId !== 'working') {
+      const rev = revisions.find(r => r.id === selectedRevisionId)
+      if (rev?.snapshot) filesToUpload = rev.snapshot
+    }
+    const resourceName = getProxyNameFromFiles(filesToUpload)
+    const companyName = (typeof localStorage !== 'undefined' && localStorage.getItem('companyName')) || 'probestack'
+    const uploadType = bundleType === 'sharedflow' ? 'sharedflow' : 'proxy'
+
+    setSaveToGcsInProgress(true)
+    try {
+      const zipBlob = await getZipBlobFromFiles(filesToUpload)
+      const formData = new FormData()
+      formData.append('file', zipBlob, `${resourceName}.zip`)
+      formData.append('company', companyName)
+      formData.append('org', org)
+      formData.append('env', env)
+      formData.append('type', uploadType)
+      formData.append('resourceName', resourceName)
+
+      const res = await fetch(BUNDLES_UPLOAD_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'X-Partner-Id': companyName.toLowerCase()
+        },
+        body: formData
+      })
+      if (!res.ok) {
+        const errBody = await res.text()
+        let errMsg = res.statusText
+        try { const j = JSON.parse(errBody); errMsg = j.message || j.error || errMsg } catch (_) { errMsg = errBody || errMsg }
+        throw new Error(errMsg)
+      }
+      setIsSavedToGcs(true)
+      setStatus({ kind: 'ok', msg: `Saved ${uploadType === 'sharedflow' ? 'shared flow' : 'proxy'} bundle to GCS (${bucketName}).` })
+      triggerReassess()
+    } catch (e) {
+      setStatus({ kind: 'err', msg: `Save to GCS failed: ${e?.message || e}` })
+    } finally {
+      setSaveToGcsInProgress(false)
+    }
+  }
+
+  /* -------- 3-dot menu with Rename/Delete + OpenAPI -------- */
+  function KebobMenu() {
+    const btnRef = kebabRef
+    const [menuOpenLocal, setMenuOpenLocal] = useState(false)
+    const [pos, setPos] = useState({ top: 0, left: 0 })
+    useEffect(() => { setMenuOpenLocal(menuOpen) }, [menuOpen])
+    const placeMenu = () => {
+      if (!btnRef.current) return
+      const r = btnRef.current.getBoundingClientRect()
+      const gap = 8
+      const left = Math.min(Math.max(8, r.right - 240), window.innerWidth - 248)
+      const top = Math.min(r.bottom + gap, window.innerHeight - 12)
+      setPos({ top, left })
+    }
+    useEffect(() => {
+      if (menuOpenLocal) {
+        placeMenu()
+        const onScrollOrResize = () => placeMenu()
+        window.addEventListener('scroll', onScrollOrResize, true)
+        window.addEventListener('resize', onScrollOrResize)
+        return () => {
+          window.removeEventListener('scroll', onScrollOrResize, true)
+          window.removeEventListener('resize', onScrollOrResize)
+        }
+      }
+    }, [menuOpenLocal])
+
+    const itemStyle = { padding: '12px 16px', fontSize: 12, lineHeight: 1.35, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }
+    const itemHover = (e, on) => { e.currentTarget.style.background = on ? 'var(--chip-hover)' : 'transparent' }
+    const closeAll = () => { setMenuOpen(false); setMenuOpenLocal(false) }
+
+    const MenuBody = (
+      <div role="menu"
+        style={{
+          position: 'fixed', top: pos.top, left: pos.left, background: '#161b26', border: '1px solid var(--border)',
+          borderRadius: 10, minWidth: 240, maxWidth: 320, maxHeight: '60vh', overflowY: 'auto',
+          boxShadow: '0 14px 40px rgba(0,0,0,.45)', zIndex: 9999, padding: 6
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* New Proxy */}
+        <div style={itemStyle}
+          onMouseEnter={(e) => itemHover(e, true)} onMouseLeave={(e) => itemHover(e, false)}
+          onClick={() => {
+            const skel = defaultSkeleton({name:editorSelectedProxyName})
+            const m = new Map(Object.entries(skel))
+            setFiles(m)
+            const roots = listBundleRoot(m)
+            setCurrentPath(roots[0] || 'apiproxy/SampleProxy.xml')
+            setSelectedRevisionId('working')
+            setStatus({ kind: 'ok', msg: 'New proxy skeleton created.' })
+            closeAll()
+          }}
+        >New Proxy</div>
+
+        {/* Import Proxy */}
+        <div
+          style={{ ...itemStyle, cursor: 'pointer' }}
+          onMouseEnter={(e) => itemHover(e, true)} onMouseLeave={(e) => itemHover(e, false)}
+          onClick={() => {
+            fileInputRef.current?.click()
+            setTimeout(() => { setMenuOpen(false) }, 0)
+          }}
+        >
+          Import
+        </div>
+
+        {/* Import OpenAPI (NEW) */}
+        <div
+          style={{ ...itemStyle, cursor: 'pointer' }}
+          onMouseEnter={(e) => itemHover(e, true)} onMouseLeave={(e) => itemHover(e, false)}
+          onClick={() => {
+            oasInputRef.current?.click()
+            setTimeout(() => { setMenuOpen(false) }, 0)
+          }}
+        >
+          Import OpenAPI
+        </div>
+
+        {/* Export Revision */}
+        <div style={itemStyle}
+          onMouseEnter={(e) => itemHover(e, true)} onMouseLeave={(e) => itemHover(e, false)}
+          onClick={async () => { await onExportSelectedRevision(); closeAll() }}
+        >Export Revision</div>
+
+        <div style={{ height: 1, background: 'var(--border)', margin: '6px 4px' }} />
+
+        {/* Rename Revision */}
+        {/* <div
+          style={{
+            ...itemStyle,
+            cursor: selectedRevisionId === 'working' ? 'not-allowed' : 'pointer',
+            opacity: selectedRevisionId === 'working' ? .5 : 1
+          }}
+          onMouseEnter={(e) => selectedRevisionId !== 'working' && itemHover(e, true)}
+          onMouseLeave={(e) => selectedRevisionId !== 'working' && itemHover(e, false)}
+          onClick={() => {
+            if (selectedRevisionId === 'working') return
+            const r = revisions.find(x => x.id === selectedRevisionId)
+            if (!r) return
+            setRenameDlg({ open: true, revId: r.id, name: r.name })
+            closeAll()
+          }}
+        >Rename Revision…</div> */}
+
+        {/* Delete Revision */}
+        <div
+          style={{
+            ...itemStyle,
+            cursor: selectedRevisionId === 'working' ? 'not-allowed' : 'pointer',
+            color: selectedRevisionId === 'working' ? 'inherit' : '#f87171',
+            opacity: selectedRevisionId === 'working' ? .5 : 1
+          }}
+          onMouseEnter={(e) => selectedRevisionId !== 'working' && itemHover(e, true)}
+          onMouseLeave={(e) => selectedRevisionId !== 'working' && itemHover(e, false)}
+          onClick={() => {
+            if (selectedRevisionId === 'working') return
+            const r = revisions.find(x => x.id === selectedRevisionId)
+            if (!r) return
+            const ok = window.confirm(`Delete ${r.name}? This cannot be undone.`)
+            if (!ok) { closeAll(); return }
+            setRevisions(prev => prev.filter(x => x.id !== r.id))
+            setSelectedRevisionId('working')
+            setStatus({ kind: 'ok', msg: `Deleted ${r.name}` })
+            closeAll()
+          }}
+        >Delete Revision…</div>
+      </div>
+    )
+
+    return (
+      <div style={{ position: 'relative' }} ref={kebabRef}>
+        <button
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v) }}
+          title="More actions"
+          style={{ border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', padding: '8px 12px', borderRadius: 8, cursor: 'pointer' }}
+        >⋯</button>
+        {menuOpenLocal && createPortal(MenuBody, document.body)}
+      </div>
+    )
+  }
+
+  /* -------------------- RENDER -------------------- */
+  const policyNames = listPolicyNames(files)
+  const policyPaths = listPolicyPaths(files)
+  const isPolicyFile = currentPath && currentPath.includes('/policies/') && currentPath.endsWith('.xml')
+  const policyDocInfo = useMemo(() => {
+    if (!isPolicyFile) return null
+    const xml = files.get(currentPath) || ''
+    return getPolicyDocsInfo(xml)
+  }, [isPolicyFile, currentPath, files])
+
+  const roots = listBundleRoot(files)
+  const currentRev =
+    selectedRevisionId === 'working' ? { id: 'working', name: '-' } :
+      revisions.find(r => r.id === selectedRevisionId) || { id: 'working', name: '-' }
+  const currentRevLabel = currentRev.id === 'working' ? '-' : parseRevLabel(currentRev.name)
+
+  return (
+    <div ref={proxyEditorRef} className={styles.proxyEditor} data-proxy-editor="true">
+      <div className={`${styles.appGrid} app-grid`}>
+        <header className={`${styles.appHeader} app-header`} style={{ flexWrap: 'wrap', gap: 10 }}>
+          <img src="/assets/justlogo.png" alt="Forge Editor" className="h-12 w-auto" />
+          <div className="flex flex-col">
+            <span className="text-xl font-extrabold gradient-text">
+              ForgeEditor
+            </span>
+            {/* <span className="text-[0.65rem] text-muted-foreground leading-tight mt-0.5">A ForgeCrux Product</span> */}
+          </div>
+          <div style={{ flex: 1, minWidth: 8 }} />
+          {handleBack && (
+            <button
+              onClick={handleBack}
+              className="back-button"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
+                padding: '6px 12px',
+                color: 'var(--text)',
+                cursor: 'pointer',
+                fontSize: '12px',
+                marginRight: '12px',
+              }}
+            >
+              Back to Previous Page
+            </button>
+          )}
+          <span style={{
+            margin: 0,
+            fontSize: 12,
+            fontWeight: 'bold',
+            color: '#f97316',
+            opacity: 0.9,
+            border: '1px solid rgba(249, 115, 22, 0.4)',
+            background: 'rgba(249, 115, 22, 0.1)',
+            padding: '8px 10px',
+            borderRadius: '6px',
+            display: 'inline-flex',
+            alignItems: 'center'
+          }}>
+            {getProxyNameFromFiles(files) || 'Proxy'}
+          </span>
+          <div style={{ flex: 1, minWidth: 8 }} />
+          <span style={{ fontSize: 12, opacity: 1, fontWeight: 'bold' }}>Revision:</span>
+          <button
+            ref={revBtnRef}
+            onClick={(e) => { e.stopPropagation(); setRevMenuOpen(v => !v) }}
+            style={{
+              textAlign: 'left',
+              padding: '8px 10px',
+              border: '1px solid var(--border)',
+              background: 'var(--panel)',
+              color: 'var(--text)',
+              borderRadius: 8,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              width: 'max-content',
+            }}
+            title="Switch revision"
+          >
+            <span style={{ fontSize: 12 }}>{currentRevLabel}</span>
+            <span aria-hidden style={{ opacity: .8 }}>
+              {revMenuOpen ? <ChevronDown className="w-3.5 h-3.5 rotate-180" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </span>
+          </button>
+          <KebobMenu />
+          <div ref={saveBtnRef} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+              onClick={onSaveRevision}
+              style={{
+                padding: '8px 12px',
+                border: '1px solid var(--primary)',
+                background: 'var(--primary)',
+                color: '#fff',
+                borderRadius: '8px 0 0 8px',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: 12,
+              }}
+            >
+              Save
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSaveDropdownOpen(v => !v) }}
+              title="More save options"
+              style={{
+                padding: '8px 6px',
+                border: '1px solid var(--primary)',
+                borderLeft: '1px solid rgba(255,255,255,0.3)',
+                background: 'var(--primary)',
+                color: '#fff',
+                borderRadius: '0 8px 8px 0',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: 12,
+              }}
+            >
+              ▾
+            </button>
+            {saveDropdownOpen && createPortal(
+              <div
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'fixed',
+                  top: (saveBtnRef.current?.getBoundingClientRect().bottom ?? 0) + 6,
+                  left: saveBtnRef.current?.getBoundingClientRect().left ?? 0,
+                  background: '#161b26',
+                  color: 'var(--text)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  minWidth: 160,
+                  boxShadow: '0 14px 40px rgba(0,0,0,.45)',
+                  zIndex: 9999,
+                  padding: 6,
+                }}
+              >
+                <div
+                  onClick={() => {
+                    setSaveDropdownOpen(false)
+                    onSaveRevision()
+                  }}
+                  style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 8, fontSize: 12, borderBottom: '1px solid var(--border)', marginBottom: 4 }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--chip-hover)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  Save as New Revision
+                </div>
+                <div
+                  onClick={() => {
+                    if (saveToGcsInProgress) return
+                    setSaveDropdownOpen(false)
+                    handleSaveToGcs()
+                  }}
+                  style={{ padding: '10px 12px', cursor: saveToGcsInProgress ? 'wait' : 'pointer', borderRadius: 8, fontSize: 12, opacity: saveToGcsInProgress ? 0.7 : 1, pointerEvents: saveToGcsInProgress ? 'none' : 'auto' }}
+                  onMouseEnter={e => { if (!saveToGcsInProgress) e.currentTarget.style.background = 'var(--chip-hover)' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {saveToGcsInProgress ? 'Saving…' : 'Save to GCS'}
+                </div>
+              </div>,
+              document.body
+            )}
+          </div>
+          <button
+            disabled={!isSavedToGcs}
+            onClick={() => setDeployDlg(s => ({ ...s, open: true, org: searchParams.get('apigeeXOrg') || searchParams.get('org') || 'my-org', env: searchParams.get('apigeeXEnv') || searchParams.get('env') || 'test', revId: selectedRevisionId, phase: 'idle' }))}
+            style={{
+              padding: '8px 12px',
+              border: '1px solid #F97316',
+              background: '#F97316',
+              color: '#fff',
+              borderRadius: 8,
+              cursor: isSavedToGcs ? 'pointer' : 'not-allowed',
+              fontWeight: 600,
+              fontSize: 12,
+              opacity: isSavedToGcs ? 1 : 0.5
+            }}
+            title={isSavedToGcs ? "Deploy proxy" : "Save to GCS first to enable deployment"}
+          >
+            Deploy
+          </button>
+          <input
+            id="zipInput"
+            type="file"
+            ref={fileInputRef}
+            accept=".zip"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onImportZip(f) }}
+            style={{ display: 'none' }}
+          />
+          <input
+            type="file"
+            ref={oasInputRef}
+            accept=".yaml,.yml,.json,application/json,text/yaml,text/x-yaml"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) onImportOpenAPI(f)
+              e.target.value = ''
+            }}
+          />
+          <button
+            onClick={() => setShowAI(true)}
+            style={{
+              padding: '8px 12px',
+              border: '1px solid #F97316',
+              background: '#F97316',
+              color: '#fff',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginRight: 50
+            }}
+          >
+            <Bot className="w-4 h-4" />
+            AI Assistance
+          </button>
+        </header>
+
+        <aside className={styles.sidebar}>
+          {/* Search bar – exactly like HTML */}
+          <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', color: '#3d4d6a' }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Search proxy…"
+              onChange={(e) => filterTree(e.target.value)}
+              style={{
+                width: '100%',
+                background: '#0f121a',
+                border: '1px solid #2d3748',
+                borderRadius: 6,
+                padding: '6px 10px 6px 28px',
+                color: '#e2e8f0',
+                fontSize: 12,
+                outline: 'none'
+              }}
+            />
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 14px' }}>
+            {/* Root node */}
+            <div
+              onClick={() => {
+                const root = listBundleRoot(files)[0];
+                if (root) setCurrentPath(root);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '7px 14px',
+                fontSize: 13,
+                fontWeight: 600,
+                color: 'var(--text)',
+                cursor: 'pointer',
+                borderRadius: 5,
+                margin: '1px 5px',
+                background: (!currentPath?.includes('/policies/') && !currentPath?.includes('/proxies/') && !currentPath?.includes('/targets/')) ? 'rgba(79,142,247,.12)' : 'transparent'
+              }}
+            >
+              <span>☰</span> {getProxyNameFromFiles(files)}
+            </div>
+
+            {/* ========= Policies Section ========= */}
+            {/* ========= Policies Section ========= */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+                Policies
+              </span>
+              <div
+                onClick={() => openPolicyDialog(null)}
+                style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+              >+</div>
+            </div>
+
+            {policyPaths.map(p => {
+              const name = stripXmlExt(p.split('/').pop());
+              let icon = '📄';
+              if (name.toLowerCase().includes('verify')) icon = '🔑';
+              else if (name.toLowerCase().includes('oauth')) icon = '🔐';
+              else if (name.toLowerCase().includes('jwt')) icon = '🎫';
+              else if (name.toLowerCase().includes('spike')) icon = '⚡';
+              else if (name.toLowerCase().includes('quota')) icon = '📏';
+              else if (name.toLowerCase().includes('llm') || name.toLowerCase().includes('ai')) icon = '🧠';
+              else if (name.toLowerCase().includes('mcp')) icon = '🔌';
+              return (
+                <div
+                  key={p}
+                  draggable="true"
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', name);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  onClick={() => setCurrentPath(p)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 26px',
+                    fontSize: 12, color: 'var(--text2)', cursor: 'grab', borderRadius: 5,
+                    margin: '1px 5px', position: 'relative',
+                    background: currentPath === p ? 'rgba(79,142,247,.12)' : 'transparent'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#181d2a'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = currentPath === p ? 'rgba(79,142,247,.12)' : 'transparent'; }}
+                >
+                  <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, background: 'rgba(79,142,247,.12)' }}>
+                    {icon}
+                  </div>
+                  <span style={{ flex: 1 }}>{name}</span>
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete policy "${name}"?`)) onDeletePolicy(p);
+                    }}
+                    style={{ opacity: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, color: '#94a3b8', fontSize: 13 }}
+                    className="policy-delete-btn"
+                  >⋯</div>
+                </div>
+              );
+            })}
+            {/* <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+                Policies
+              </span>
+              <div
+                onClick={() => openPolicyDialog(null)}
+                style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+              >+</div>
+            </div>
+
+            {policyPaths.map(p => {
+              const name = stripXmlExt(p.split('/').pop());
+              let icon = '📄';
+              if (name.toLowerCase().includes('verify')) icon = '🔑';
+              else if (name.toLowerCase().includes('oauth')) icon = '🔐';
+              else if (name.toLowerCase().includes('jwt')) icon = '🎫';
+              else if (name.toLowerCase().includes('spike')) icon = '⚡';
+              else if (name.toLowerCase().includes('quota')) icon = '📏';
+              else if (name.toLowerCase().includes('llm') || name.toLowerCase().includes('ai')) icon = '🧠';
+              else if (name.toLowerCase().includes('mcp')) icon = '🔌';
+              return (
+                <div
+                  key={p}
+                  onClick={() => setCurrentPath(p)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 26px',
+                    fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                    margin: '1px 5px', position: 'relative',
+                    background: currentPath === p ? 'rgba(79,142,247,.12)' : 'transparent'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#181d2a'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = currentPath === p ? 'rgba(79,142,247,.12)' : 'transparent'; }}
+                >
+                  <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, background: 'rgba(79,142,247,.12)' }}>
+                    {icon}
+                  </div>
+                  <span style={{ flex: 1 }}>{name}</span>
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`Delete policy "${name}"?`)) onDeletePolicy(p);
+                    }}
+                    style={{ opacity: 0, width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, color: '#94a3b8', fontSize: 13 }}
+                    className="policy-delete-btn"
+                  >⋯</div>
+                </div>
+              );
+            })} */}
+
+            {/* ========= Proxy Endpoints Section ========= */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#a78bfa', display: 'inline-block' }}></span>
+                Proxy endpoints
+              </span>
+              <div
+                onClick={() => {
+                  const existing = new Set(listProxyEndpoints(files));
+                  let filename = 'apiproxy/proxies/new-proxy.xml';
+                  let i = 1;
+                  while (existing.has(filename)) { i++; filename = `apiproxy/proxies/new-proxy-${i}.xml`; }
+                  const name = stripXmlExt(filename.split('/').pop());
+                  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ProxyEndpoint name="${name}">
+  <PreFlow name="PreFlow"><Request/><Response/></PreFlow>
+  <PostFlow name="PostFlow"><Request/><Response/></PostFlow>
+  <HTTPProxyConnection><BasePath>/v1</BasePath><VirtualHost>default</VirtualHost></HTTPProxyConnection>
+  <RouteRule name="to-default"><TargetEndpoint>default</TargetEndpoint></RouteRule>
+</ProxyEndpoint>`;
+                  setFiles(prev => { const m = new Map(prev); m.set(filename, xml); return m; });
+                  setSelectedProxy(filename);
+                  setFlowSide('proxy');
+                  setCurrentPath(filename);
+                  setStatus({ kind: 'ok', msg: `Created proxy endpoint: ${name}` });
+                }}
+                style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+              >+</div>
+            </div>
+
+            {listProxyEndpoints(files).map(proxyPath => {
+              const name = stripXmlExt(proxyPath.split('/').pop());
+              const isOpen = openProxyNodes[proxyPath];
+              return (
+                <div key={proxyPath}>
+                  <div
+                    onClick={() => setOpenProxyNodes(prev => ({ ...prev, [proxyPath]: !prev[proxyPath] }))}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px',
+                      fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                      margin: '1px 5px'
+                    }}
+                  >
+                    <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: 'rgba(167,139,250,.12)' }}>🎯</div>
+                    <span style={{ fontSize: 12 }}>{name}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 10, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
+                  </div>
+                  {isOpen && (
+                    <div>
+                      {/* PreFlow */}
+                      <div
+                        onClick={() => { setCurrentPath(proxyPath); setFlowSide('proxy'); setSelectedProxy(proxyPath); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 34px',
+                          fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                          margin: '1px 5px'
+                        }}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.4px', background: 'rgba(251,146,60,.12)', color: '#fb923c' }}>ALL</span>
+                        PreFlow
+                      </div>
+                      {/* Flows */}
+                      {getFlowBlocks(files.get(proxyPath) || '').map(flow => {
+                        const verb = extractVerbFromCondition(flow.condition) || 'ALL';
+                        const pillStyles = verb === 'ALL' ? { background: 'rgba(251,146,60,.12)', color: '#fb923c' } :
+                          verb === 'GET' ? { background: 'rgba(52,211,153,.12)', color: '#34d399' } :
+                            verb === 'POST' ? { background: 'rgba(79,142,247,.12)', color: '#4f8ef7' } :
+                              verb === 'PUT' ? { background: 'rgba(167,139,250,.12)', color: '#a78bfa' } :
+                                { background: 'rgba(248,113,113,.12)', color: '#f87171' };
+                        return (
+                          <div
+                            key={flow.name}
+                            onClick={() => { setCurrentPath(proxyPath); setFlowSide('proxy'); setSelectedProxy(proxyPath); }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 34px',
+                              fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                              margin: '1px 5px'
+                            }}
+                          >
+                            <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.4px', ...pillStyles }}>{verb}</span>
+                            {flow.name}
+                          </div>
+                        );
+                      })}
+                      {/* PostFlow */}
+                      <div
+                        onClick={() => { setCurrentPath(proxyPath); setFlowSide('proxy'); setSelectedProxy(proxyPath); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 34px',
+                          fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                          margin: '1px 5px'
+                        }}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.4px', background: 'rgba(251,146,60,.12)', color: '#fb923c' }}>ALL</span>
+                        PostFlow
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* ========= Target Endpoints Section ========= */}
+            {/* ========= Target Endpoints Section ========= */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#34d399', display: 'inline-block' }}></span>
+                Target endpoints
+              </span>
+              <div
+                onClick={() => {
+                  const existing = new Set(listTargetEndpoints(files));
+                  let filename = 'apiproxy/targets/new-target.xml';
+                  let i = 1;
+                  while (existing.has(filename)) { i++; filename = `apiproxy/targets/new-target-${i}.xml`; }
+                  const name = stripXmlExt(filename.split('/').pop());
+                  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<TargetEndpoint name="${name}">
+  <PreFlow name="PreFlow"><Request/><Response/></PreFlow>
+  <PostFlow name="PostFlow"><Request/><Response/></PostFlow>
+  <HTTPTargetConnection><URL>https://example.com</URL></HTTPTargetConnection>
+</TargetEndpoint>`;
+                  setFiles(prev => { const m = new Map(prev); m.set(filename, xml); return m; });
+                  setSelectedTarget(filename);
+                  setFlowSide('target');
+                  setCurrentPath(filename);
+                  setStatus({ kind: 'ok', msg: `Created target endpoint: ${name}` });
+                }}
+                style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+              >+</div>
+            </div>
+
+            {listTargetEndpoints(files).map(targetPath => {
+              const name = stripXmlExt(targetPath.split('/').pop());
+              const isOpen = openTargetNodes[targetPath];
+              return (
+                <div key={targetPath}>
+                  <div
+                    onClick={() => setOpenTargetNodes(prev => ({ ...prev, [targetPath]: !prev[targetPath] }))}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px',
+                      fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                      margin: '1px 5px', position: 'relative'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#181d2a'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: 'rgba(52,211,153,.12)' }}>🎯</div>
+                    <span style={{ fontSize: 12, flex: 1 }}>{name}</span>
+                    {/* Delete button (appears on hover) */}
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (listTargetEndpoints(files).length <= 1) {
+                          setStatus({ kind: 'warn', msg: 'At least one target endpoint is required.' });
+                          return;
+                        }
+                        if (window.confirm(`Delete target endpoint "${name}"?`)) onDeleteTargetEndpoint(targetPath);
+                      }}
+                      style={{
+                        opacity: 0, width: 18, height: 18, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', borderRadius: 4, color: '#94a3b8', fontSize: 13
+                      }}
+                      className="policy-delete-btn"
+                    >🗑️</div>
+                    <span style={{ marginLeft: 'auto', fontSize: 10, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
+                  </div>
+                  {isOpen && (
+                    <div>
+                      {/* PreFlow row – exactly like proxy endpoints */}
+                      <div
+                        onClick={() => { setCurrentPath(targetPath); setFlowSide('target'); setSelectedTarget(targetPath); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 34px',
+                          fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                          margin: '1px 5px'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#181d2a'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.4px', background: 'rgba(251,146,60,.12)', color: '#fb923c' }}>ALL</span>
+                        PreFlow
+                      </div>
+                      {/* PostFlow row */}
+                      <div
+                        onClick={() => { setCurrentPath(targetPath); setFlowSide('target'); setSelectedTarget(targetPath); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 34px',
+                          fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                          margin: '1px 5px'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#181d2a'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 3, letterSpacing: '0.4px', background: 'rgba(251,146,60,.12)', color: '#fb923c' }}>ALL</span>
+                        PostFlow
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {/* <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#34d399', display: 'inline-block' }}></span>
+        Target endpoints
+      </span>
+      <div
+        onClick={() => {
+          const existing = new Set(listTargetEndpoints(files));
+          let filename = 'apiproxy/targets/new-target.xml';
+          let i = 1;
+          while (existing.has(filename)) { i++; filename = `apiproxy/targets/new-target-${i}.xml`; }
+          const name = stripXmlExt(filename.split('/').pop());
+          const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<TargetEndpoint name="${name}">
+  <PreFlow name="PreFlow"><Request/><Response/></PreFlow>
+  <PostFlow name="PostFlow"><Request/><Response/></PostFlow>
+  <HTTPTargetConnection><URL>https://example.com</URL></HTTPTargetConnection>
+</TargetEndpoint>`;
+          setFiles(prev => { const m = new Map(prev); m.set(filename, xml); return m; });
+          setSelectedTarget(filename);
+          setFlowSide('target');
+          setCurrentPath(filename);
+          setStatus({ kind: 'ok', msg: `Created target endpoint: ${name}` });
+        }}
+        style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+      >+</div>
+    </div>
+
+    {listTargetEndpoints(files).map(targetPath => {
+      const name = stripXmlExt(targetPath.split('/').pop());
+      const isOpen = openTargetNodes[targetPath];
+      return (
+        <div key={targetPath}>
+          <div
+            onClick={() => setOpenTargetNodes(prev => ({ ...prev, [targetPath]: !prev[targetPath] }))}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px',
+              fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+              margin: '1px 5px'
+            }}
+          >
+            <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, background: 'rgba(52,211,153,.12)' }}>🎯</div>
+            <span style={{ fontSize: 12 }}>{name}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>▶</span>
+          </div>
+          {isOpen && (
+            <div>
+              <div style={{ paddingLeft: 34 }}>PreFlow</div>
+              <div style={{ paddingLeft: 34 }}>PostFlow</div>
+            </div>
+          )}
+        </div>
+      );
+    })} */}
+
+            {/* ========= Resources Section ========= */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 3px', fontSize: 10, fontWeight: 600, color: '#7f8fa8', textTransform: 'uppercase', letterSpacing: '0.8px', marginTop: 6 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#fbbf24', display: 'inline-block' }}></span>
+                Resources
+              </span>
+              <div
+                onClick={() => {
+                  const roots = listBundleRoot(files);
+                  const baseDir = (roots[0] || 'apiproxy/SampleProxy.xml').replace(/\/[^/]+$/, '');
+                  const resPrefix = baseDir ? `${baseDir}/resources/` : 'apiproxy/resources/';
+                  const existing = new Set(listResources(files));
+                  let filename = `${resPrefix}resource.txt`;
+                  let i = 1;
+                  while (existing.has(filename)) { i++; filename = `${resPrefix}resource-${i}.txt`; }
+                  setFiles(prev => { const m = new Map(prev); m.set(filename, ''); return m; });
+                  setCurrentPath(filename);
+                  setStatus({ kind: 'ok', msg: `Created resource: ${filename.split('/').pop()}` });
+                }}
+                style={{ width: 18, height: 18, border: '1px solid #2d3748', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#94a3b8', fontSize: 14 }}
+              >+</div>
+            </div>
+
+            {listResources(files).map(resPath => (
+              <div
+                key={resPath}
+                onClick={() => setCurrentPath(resPath)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 7, padding: '5px 14px 5px 26px',
+                  fontSize: 12, color: 'var(--text2)', cursor: 'pointer', borderRadius: 5,
+                  margin: '1px 5px',
+                  background: currentPath === resPath ? 'rgba(79,142,247,.12)' : 'transparent'
+                }}
+              >
+                <div style={{ width: 22, height: 22, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, background: 'rgba(251,191,36,.12)' }}>📄</div>
+                <span>{resPath.split('/').pop()}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Status bar at the bottom */}
+          <div style={{ padding: 16, borderTop: '1px solid #2d3748', background: '#0f121a' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#7f8fa8' }}>
+              <span>Bundle Size: {bundleSize}</span>
+              <span style={{ color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 5px #22c55e', animation: 'glow 2s infinite' }} />
+                Connected
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        {/* <aside className={styles.sidebar}>
+          
+          <div className={styles.tree}>
+            {roots.length ? roots.map(p => (
+              <Item key={p} active={currentPath === p} onClick={() => setCurrentPath(p)}>
+                {stripXmlExt(p.split('/').pop())}
+              </Item>
+            )) : <Item muted>(missing root XML)</Item>}
+
+            <Folder label="Policies" open={openGroups.policies} onToggle={() => setOpenGroups(s => ({ ...s, policies: !s.policies }))} action={{
+              label: <Plus className="w-3 h-3" />,
+              onClick: () => openPolicyDialog(null),
+            }}>
+              {policyPaths.map(p => {
+                const name = p.split('/').pop().replace(/\.xml$/, '')
+                const onDragStart = (e) => { e.dataTransfer.setData('text/plain', name); e.dataTransfer.effectAllowed = 'copy' }
+                return (
+                  <Item key={p} active={currentPath === p} onClick={() => setCurrentPath(p)} draggable onDragStart={onDragStart}>
+                    <span title="Drag" style={{ cursor: 'grab', opacity: .7, marginRight: 6 }}>⠿</span>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {stripXmlExt(p.split('/').pop())}
+                    </span>
+                    <button
+                      type="button"
+                      title="Delete policy"
+                      onClick={(e) => { e.stopPropagation(); onDeletePolicy(p) }}
+                      className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-red-500/10 hover:border-red-500/50 transition-colors ml-auto group"
+                    >
+                      <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-red-500 transition-colors" />
+                    </button>
+                  </Item>
+                )
+              })}
+            </Folder>
+
+            {bundleType === 'proxy' && (
+              <>
+                <Folder label="Proxy Endpoints" open={openGroups.proxies} onToggle={() => setOpenGroups(s => ({ ...s, proxies: !s.proxies }))} action={{
+                  label: <Plus className="w-3 h-3" />, onClick: () => {
+                    const existing = new Set(listProxyEndpoints(files))
+                    const base = 'apiproxy/proxies/proxy.xml'
+                    let filename = base
+                    let i = 1; while (existing.has(filename)) { i++; filename = `apiproxy/proxies/proxy-${i}.xml` }
+                    const name = filename.split('/').pop().replace(/\.xml$/, '')
+                    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<ProxyEndpoint name="${name}">
+  <PreFlow name="PreFlow">
+    <Request/>
+    <Response/>
+  </PreFlow>
+  <PostFlow name="PostFlow">
+    <Request/>
+    <Response/>
+  </PostFlow>
+  <HTTPProxyConnection>
+    <BasePath>/v1</BasePath>
+    <VirtualHost>default</VirtualHost>
+  </HTTPProxyConnection>
+  <RouteRule name="to-default"><TargetEndpoint>default</TargetEndpoint></RouteRule>
+</ProxyEndpoint>
+`
+                    setFiles(prev => { const m = new Map(prev); m.set(filename, xml); return m })
+                    setSelectedProxy(filename); setFlowSide('proxy'); setCurrentPath(filename)
+                    setStatus({ kind: 'ok', msg: `Created proxy endpoint: ${name}` })
+                  }
+                }}>
+                  {listProxyEndpoints(files).length ? listProxyEndpoints(files).map(p => {
+                    const open = !!openProxyNodes[p]
+                    const flows = listFlowsForProxy(p)
+                    return (
+                      <div key={p}>
+                        <Item active={currentPath === p}>
+                          <ChevronRight
+                            className={`w-4 h-4 transition-transform ${open ? 'rotate-90' : ''}`}
+                            onClick={() => setOpenProxyNodes(s => ({ ...s, [p]: !s[p] }))}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <span style={{ cursor: 'pointer', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => { setCurrentPath(p); setFlowSide('proxy'); setSelectedProxy(p) }}>{stripXmlExt(p.split('/').pop())}</span>
+                          <button
+                            type="button"
+                            title="Add Flow"
+                            onClick={(e) => { e.stopPropagation(); openAddFlowDialog(p) }}
+                            className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-primary/10 hover:border-primary/50 transition-colors ml-auto"
+                          >
+                            <Plus className="w-3 h-3 text-muted-foreground" />
+                          </button>
+                          <button
+                            type="button"
+                            title={listProxyEndpoints(files).length > 1 ? "Delete proxy endpoint" : "At least one proxy endpoint is required"}
+                            onClick={(e) => { e.stopPropagation(); onDeleteProxyEndpoint(p) }}
+                            style={{ opacity: listProxyEndpoints(files).length > 1 ? 1 : 0.5, cursor: listProxyEndpoints(files).length > 1 ? 'pointer' : 'not-allowed' }}
+                            disabled={listProxyEndpoints(files).length <= 1}
+                            className={`h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center ${listProxyEndpoints(files).length > 1 ? 'hover:bg-red-500/10 hover:border-red-500/50' : ''} transition-colors group`}
+                          >
+                            <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-red-500 transition-colors" />
+                          </button>
+                        </Item>
+
+                        {open && (
+                          <>
+                            <Item muted style={{ paddingLeft: 24 }}>PreFlow</Item>
+
+                            
+                            <div className="item muted" style={{ paddingLeft: 24, display: 'flex', alignItems: 'center', width: '100%' }}>
+                              <span>Flows</span>
+                              <button
+                                type="button"
+                                title="Add Flow"
+                                className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-primary/10 hover:border-primary/50 transition-colors ml-auto"
+                                onClick={(e) => { e.stopPropagation(); openAddFlowDialog(p) }}
+                              >
+                                <Plus className="w-3 h-3 text-muted-foreground" />
+                              </button>
+                            </div>
+
+                            {!!flows.length && flows.map((f, idx) => {
+                              const hasCond = hasAnyCondition(f.condition)
+                              const verbFromCond = hasCond ? extractVerbFromCondition(f.condition) : null
+                              let pillLabel = 'All'
+                              let pillCls = 'pill pill-all'
+                              if (hasCond) {
+                                if (verbFromCond) { pillLabel = verbFromCond; pillCls = pillClassForVerb(verbFromCond) }
+                                else { pillLabel = 'cond'; pillCls = 'pill pill-cond' }
+                              }
+                              const pathFrag = extractPathFromCondition(f.condition)
+                              return (
+                                <div
+                                  key={p + '-flow-' + f.name}
+                                  className="item"
+                                  draggable
+                                  onDragStart={(e) => onFlowDragStart(e, p, idx)}
+                                  onDragOver={onFlowDragOver}
+                                  onDrop={(e) => onFlowDrop(e, p, idx)}
+                                  title={f.condition || f.name}
+                                  style={{ padding: '6px 12px 6px 40px', margin: '2px 6px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8 }}
+                                >
+                                  <span className={pillCls}>{pillLabel}</span>
+                                  <span
+                                    style={{ fontWeight: 600, flex: 1, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                    onClick={() => { setCurrentPath(p); setFlowSide('proxy'); setSelectedProxy(p) }}
+                                  >
+                                    {f.name}
+                                    {pathFrag && (
+                                      <span style={{ opacity: 0.7, marginLeft: 6, fontSize: 12 }}>
+                                        ({pathFrag})
+                                      </span>
+                                    )}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    title="Edit flow"
+                                    onClick={(e) => { e.stopPropagation(); openEditFlowDialog(p, f) }}
+                                    className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-primary/10 hover:border-primary/50 transition-colors"
+                                  >
+                                    <Settings2 className="w-3 h-3 text-muted-foreground" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Delete flow"
+                                    onClick={(e) => { e.stopPropagation(); onDeleteFlow(p, f.name) }}
+                                    className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-red-500/10 hover:border-red-500/50 transition-colors group"
+                                  >
+                                    <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-red-500 transition-colors" />
+                                  </button>
+                                </div>
+                              )
+                            })}
+
+                            <Item muted style={{ paddingLeft: 24 }}>PostFlow</Item>
+                          </>
+                        )}
+                      </div>
+                    )
+                  }) : <Item muted>(none)</Item>}
+                </Folder>
+
+                <Folder label="Target Endpoints" open={openGroups.targets} onToggle={() => setOpenGroups(s => ({ ...s, targets: !s.targets }))} action={{
+                  label: <Plus className="w-3 h-3" />,
+                  onClick: () => {
+                    const existing = new Set(listTargetEndpoints(files))
+                    const base = 'apiproxy/targets/target.xml'
+                    let filename = base
+                    let i = 1; while (existing.has(filename)) { i++; filename = `apiproxy/targets/target-${i}.xml` }
+                    const name = filename.split('/').pop().replace(/\.xml$/, '')
+                    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<TargetEndpoint name="${name}">
+  <PreFlow name="PreFlow">
+    <Request/>
+    <Response/>
+  </PreFlow>
+  <PostFlow name="PostFlow">
+    <Request/>
+    <Response/>
+  </PostFlow>
+  <HTTPTargetConnection><URL>https://example.com</URL></HTTPTargetConnection>
+</TargetEndpoint>
+`
+                    setFiles(prev => { const m = new Map(prev); m.set(filename, xml); return m })
+                    setSelectedTarget(filename); setFlowSide('target'); setCurrentPath(filename)
+                    setStatus({ kind: 'ok', msg: `Created target endpoint: ${name}` })
+                  },
+                }}>
+                  {listTargetEndpoints(files).length ? listTargetEndpoints(files).map(p => {
+                    const open = !!openTargetNodes[p]
+                    return (
+                      <div key={p}>
+                        <Item active={currentPath === p}>
+                          <ChevronRight
+                            className={`w-4 h-4 transition-transform ${open ? 'rotate-90' : ''}`}
+                            onClick={() => setOpenTargetNodes(s => ({ ...s, [p]: !s[p] }))}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <span style={{ cursor: 'pointer', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => { setCurrentPath(p); setFlowSide('target'); setSelectedTarget(p) }}>{stripXmlExt(p.split('/').pop())}</span>
+                          <button
+                            type="button"
+                            title="Delete target endpoint"
+                            onClick={(e) => { e.stopPropagation(); onDeleteTargetEndpoint(p) }}
+                            style={{ opacity: listTargetEndpoints(files).length > 1 ? 1 : 0.5, cursor: listTargetEndpoints(files).length > 1 ? 'pointer' : 'not-allowed' }}
+                            disabled={listTargetEndpoints(files).length <= 1}
+                            className={`h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center ${listTargetEndpoints(files).length > 1 ? 'hover:bg-red-500/10 hover:border-red-500/50' : ''} transition-colors ml-auto group`}
+                          >
+                            <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-red-500 transition-colors" />
+                          </button>
+                        </Item>
+                        {open && (
+                          <>
+                            <Item muted style={{ paddingLeft: 24 }}>PreFlow</Item>
+                            <Item muted style={{ paddingLeft: 24 }}>PostFlow</Item>
+                          </>
+                        )}
+                      </div>
+                    )
+                  }) : <Item muted>(none)</Item>}
+                </Folder>
+              </>
+            )}
+
+            <Folder label="Resources" open={openGroups.resources} onToggle={() => setOpenGroups(s => ({ ...s, resources: !s.resources }))} action={{
+              label: <Plus className="w-3 h-3" />,
+              onClick: () => {
+                const roots = listBundleRoot(files)
+                const baseDir = (roots[0] || 'apiproxy/SampleProxy.xml').replace(/\/[^/]+$/, '')
+                const resPrefix = baseDir ? `${baseDir}/resources/` : 'apiproxy/resources/'
+                const existing = new Set(listResources(files))
+                let filename = `${resPrefix}resource-1`
+                let i = 1; while (existing.has(filename)) { i++; filename = `${resPrefix}resource-${i}` }
+                setFiles(prev => { const m = new Map(prev); m.set(filename, ''); return m })
+                setCurrentPath(filename)
+                setStatus({ kind: 'ok', msg: `Created resource: ${filename.split('/').pop()}` })
+              },
+            }}>
+              {listResources(files).length ? listResources(files).map(p => (
+                <Item key={p} active={currentPath === p} onClick={() => setCurrentPath(p)}>
+                  <span style={{ flex: 1, minWidth: 0 }}>{stripXmlExt(p.includes('/resources/') ? p.slice(p.indexOf('/resources/') + '/resources/'.length) : p)}</span>
+                  <button
+                    type="button"
+                    title="Delete resource"
+                    onClick={(e) => { e.stopPropagation(); onDeleteResource(p) }}
+                    className="h-5 w-5 shrink-0 rounded-full bg-background-card flex items-center justify-center hover:bg-red-500/10 hover:border-red-500/50 transition-colors group"
+                  >
+                    <Trash2 className="w-3 h-3 text-muted-foreground group-hover:text-red-500 transition-colors" />
+                  </button>
+                </Item>
+              )) : <Item muted>(none)</Item>}
+            </Folder>
+          </div>
+          
+          <div
+            style={{
+              padding: 16,
+              borderBottom: '1px solid var(--border)',
+              background: 'var(--panel)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: 10,
+                color: 'var(--muted)',
+              }}
+            >
+              <span>Bundle Size: {bundleSize}</span>
+              <span style={{ color: '#22c55e', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '999px',
+                    background: '#22c55e',
+                  }}
+                />
+                Connected
+              </span>
+            </div>
+          </div>
+        </aside> */}
+
+        <main className={styles.main}>
+          {!collapseTop && (
+            <div className={styles.flowSection}>
+              <div className={styles.flowEditor}>
+                {/* Revision popover, positioned under the revision selector (in header) */}
+                {revMenuOpen && createPortal(
+                  <div
+                    role="menu"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'fixed',
+                      top: (revBtnRef.current?.getBoundingClientRect().bottom ?? 60) + 6,
+                      left: Math.min(
+                        revBtnRef.current?.getBoundingClientRect().left ?? 8,
+                        window.innerWidth - 200
+                      ),
+                      background: '#161b26',
+                      color: 'var(--text)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 10,
+                      width: 'max-content',
+                      maxHeight: '60vh',
+                      overflowY: 'auto',
+                      boxShadow: '0 14px 40px rgba(0,0,0,.45)',
+                      zIndex: 9999,
+                      padding: 6,
+                    }}
+                  >
+                    <div
+                      onClick={() => { onSelectRevision('working'); setRevMenuOpen(false) }}
+                      style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 8, display: 'flex', gap: 8, alignItems: 'center' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--chip-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <span style={{ fontWeight: 600, minWidth: 24, fontSize: 12 }}>-</span>
+                      <span style={{ opacity: .8, fontSize: 12 }}>unsaved changes</span>
+                    </div>
+                    {revisions.map(r => {
+                      const ts = (r.name.split('–')[1] || '').replace(/\s*\[.*\]\s*/, '').trim()
+                      const envTag = r.name.match(/\[(.+?)\]/)?.[0] || ''
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => { onSelectRevision(r.id); setRevMenuOpen(false) }}
+                          style={{ padding: '10px 12px', cursor: 'pointer', borderRadius: 8, display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 10 }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--chip-hover)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          title={r.name}
+                        >
+                          <div style={{ fontWeight: 700, minWidth: 24, fontSize: 12 }}>{parseRevLabel(r.name)}</div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span style={{ opacity: .85, fontSize: 12 }}>{ts || '—'}</span>
+                            {envTag && <span className="env-pill">{envTag}</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>,
+                  document.body
+                )}
+
+                {/* SharedFlow: single Flow lane */}
+                {bundleType === 'sharedflow' && (
+                  <div className={styles.laneGroup} style={{ position: 'relative' }}>
+                    <div className={styles.laneTitle}>Flow</div>
+                    <div className={`${styles.laneRow} full-lane`}>
+                      <div
+                        className={styles.lane}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); const policy = e.dataTransfer.getData('text/plain'); if (policy) addPolicyToSharedFlow(policy) }}
+                      >
+                        <div className="lane-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div className={styles.laneLabel}>Policies</div>
+                          <button className="icon-btn" title="Add Policy" onClick={() => openPolicyDialog({ section: 'sharedflow' })}>＋</button>
+                        </div>
+                        <div className={styles.laneBody}>
+                          {(() => {
+                            const sfPath = getSharedFlowMainPath(files)
+                            const xml = sfPath ? files.get(sfPath) : ''
+                            const steps = parseSharedFlowSteps(xml)
+                            return steps.length ? (
+                              steps.map((p, idx) => (
+                                <div
+                                  key={p + '-' + idx}
+                                  className={styles.chip}
+                                  draggable
+                                  onDragStart={(e) => { e.dataTransfer.setData('step-index', String(idx)); e.dataTransfer.effectAllowed = 'move' }}
+                                  onDragOver={(e) => e.preventDefault()}
+                                  onDrop={(e) => {
+                                    e.preventDefault()
+                                    const fromIndex = Number(e.dataTransfer.getData('step-index'))
+                                    if (Number.isNaN(fromIndex) || fromIndex === idx) return
+                                    const sf = getSharedFlowMainPath(files)
+                                    if (!sf) return
+                                    const x = files.get(sf) || ''
+                                    const currentSteps = parseSharedFlowSteps(x)
+                                    const reordered = [...currentSteps]
+                                    const [moved] = reordered.splice(fromIndex, 1)
+                                    reordered.splice(idx, 0, moved)
+                                    const updatedXml = replaceSharedFlowSteps(x, reordered)
+                                    setFiles(prev => { const m = new Map(prev); m.set(sf, updatedXml); return m })
+                                  }}
+                                >
+                                  <span>{p}</span>
+                                  <button onClick={() => removePolicyFromSharedFlow(p)}>×</button>
+                                </div>
+                              ))
+                            ) : (
+                              <div className={styles.muted}>Drag policies here or click ＋</div>
+                            )
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Framework Refactoring layout (proxy only): API Client → Proxy → Target → Backend Service */}
+                {bundleType === 'proxy' && (() => {
+                  const proxyPath = getProxyPath()
+                  const targetPath = getTargetPath()
+                  function FlowIndicator({ direction }) {
+                    return (
+                      <div className={`${styles.frameworkFlowIndicator} ${direction === 'request' ? styles.frameworkFlowIndicatorRequest : styles.frameworkFlowIndicatorResponse}`}>
+                        {direction === 'request' ? (
+                          <>
+                            <div className={styles.frameworkFlowIndicatorCircle} />
+                            <div className={styles.frameworkFlowIndicatorLine} />
+                            <ChevronDown className="w-4 h-4 text-muted-foreground -mt-1 shrink-0" style={{ marginBottom: 2 }} />
+                          </>
+                        ) : (
+                          <>
+                            <ChevronUp className="w-4 h-4 text-muted-foreground -mb-1 shrink-0" style={{ marginTop: 2 }} />
+                            <div className={styles.frameworkFlowIndicatorLine} />
+                            <div className={styles.frameworkFlowIndicatorCircle} />
+                          </>
+                        )}
+                      </div>
+                    )
+                  }
+                  function renderFlowRow(section, endp, sectionLabel, keyPrefix) {
+                    if (!endp) return null
+                    const xml = files.get(endp) || ''
+                    const steps = parseSteps(xml, section)
+                    return (
+                      <div key={keyPrefix} className={styles.frameworkRow}>
+                        <div className={styles.frameworkRowHead}>
+                          <div className={styles.frameworkRowLabel}>
+                            <span className={styles.frameworkRowBadge}>ALL</span>
+                            <span>{sectionLabel}</span>
+                          </div>
+                          <div className={styles.frameworkRowActions}>
+                            <button type="button" title="Add policy" onClick={() => openPolicyDialog({ section, endpoint: endp })}>
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        {/* <div
+                          className={styles.frameworkFlowBody}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+                          onDrop={(e) => onLaneDrop(section, e, endp)}
+                          > */}
+                        <div
+                          className={styles.frameworkFlowBody}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+                          // onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => onLaneDrop(section, e, endp)}
+                          // onDrop={(e) => {
+                          //   e.preventDefault();
+                          //   const policyName = e.dataTransfer.getData('text/plain');
+                          //   if (policyName) {
+                          //     addPolicyToSection(section, policyName, endpointPath);
+                          //   }
+                          // }}
+                        >
+                          {steps.map((p, idx) => (
+                            <div
+                              key={keyPrefix + '-' + p}
+                              className={styles.frameworkPolicyBlock}
+                              draggable
+                              onDragStart={(e) => { e.dataTransfer.setData('step-index', String(idx)); e.dataTransfer.setData('step-endp', endp); e.dataTransfer.setData('step-section', section); e.dataTransfer.effectAllowed = 'move' }}
+                              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move' }}
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const policyFromPalette = e.dataTransfer.getData('text/plain')
+                                if (policyFromPalette) {
+                                  addPolicyToSection(section, policyFromPalette, endp)
+                                  return
+                                }
+                                const fromIndex = Number(e.dataTransfer.getData('step-index'))
+                                const fromEndp = e.dataTransfer.getData('step-endp')
+                                const fromSection = e.dataTransfer.getData('step-section')
+                                if (fromEndp !== endp || fromSection !== section || Number.isNaN(fromIndex) || fromIndex === idx) return
+                                const x = files.get(endp) || ''
+                                const curr = parseSteps(x, section)
+                                const reordered = [...curr]
+                                const [moved] = reordered.splice(fromIndex, 1)
+                                reordered.splice(idx, 0, moved)
+                                const newXml = replaceSection(x, section, reordered)
+                                setFiles(prev => { const m = new Map(prev); m.set(endp, newXml); return m })
+                                setCurrentPath(endp)
+                              }}
+                            >
+                              <div className={styles.frameworkPolicyBlockLeft}>
+                                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                                <span className={styles.frameworkPolicyName} style={{ fontWeight: 500 }}>{p}</span>
+                                <span className={styles.frameworkPolicyInclude}>Include</span>
+                              </div>
+                              <button type="button" onClick={() => removeStep(section, p, endp)} title="Remove">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                          {steps.length === 0 && <div className={styles.muted}>Drop policies or click +</div>}
+                        </div>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className={styles.frameworkWrap}>
+                      <div className="flex items-center gap-4 ml-2 relative z-10">
+                        <div className="flex flex-col items-center">
+                          <div className="flex items-center gap-3 px-5 py-2.5 rounded-full border border-zinc-700/50 bg-[#1e2235]/40 backdrop-blur-sm mb-3 shadow-[0_0_15px_-3px_rgba(0,0,0,0.3)] ring-1 ring-white/5 group transition-all hover:bg-[#1e2235]/60 hover:border-zinc-500/50">
+                            <Monitor className="w-4 h-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
+                            <span className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-100/90 group-hover:text-white transition-colors">API Client</span>
+                          </div>
+                          <div className="w-2 h-2 rounded-full border border-border bg-transparent round-flow-icon" style={{ marginLeft: "-80px" }} />
+                          <div className="w-px h-8 bg-border flex-flow-line" style={{ marginLeft: "-80px" }} />
+                          <ChevronDown className="w-4 h-4 -mt-2 text-muted-foreground" style={{ marginLeft: "-80px" }} />
+                        </div>
+                        <ChevronLeft className="w-4 h-4 text-zinc-300 absolute left-[145px] top-[14px] transition-colors" />
+                        <div className="absolute left-[150px] top-[22px] w-[30%] h-[58px] border-r border-t border-solid border-zinc-400/60 rounded-tr-xl pointer-events-none" />
+                      </div>
+                      <section className={styles.frameworkCard}>
+                        <div className={styles.frameworkCardHeader}>Proxy Endpoint</div>
+                        <div className={styles.frameworkCardGrid}>
+                          <div className={styles.frameworkCol}>
+                            <div className={styles.frameworkColWithFlow}>
+                              <FlowIndicator direction="request" />
+                              <div className={styles.frameworkColContent}>
+                                <div className={styles.frameworkColTitle}>Request</div>
+                                {proxyPath && renderFlowRow('pre-request', proxyPath, 'PreFlow', 'proxy-req-pre')}
+                                {proxyPath && renderFlowRow('post-request', proxyPath, 'PostFlow', 'proxy-req-post')}
+                              </div>
+                            </div>
+                          </div>
+                          <div className={styles.frameworkCol}>
+                            <div className={styles.frameworkColWithFlow}>
+                              <FlowIndicator direction="response" />
+                              <div className={styles.frameworkColContent}>
+                                <div className={styles.frameworkColTitle}>Response</div>
+                                {proxyPath && renderFlowRow('post-client', proxyPath, 'PostClientFlow', 'proxy-res-post-client')}
+                                {proxyPath && renderFlowRow('pre-response', proxyPath, 'PreFlow', 'proxy-res-pre')}
+                                {proxyPath && renderFlowRow('post-response', proxyPath, 'PostFlow', 'proxy-res-post')}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                      <div className="grid grid-cols-2 h-10 pointer-events-none relative z-10 mb-1">
+                        <div className="px-6 flex gap-6">
+                          <div className="flex flex-col items-center">
+                            <div className="w-2 h-2 rounded-full border border-border bg-transparent round-flow-icon mt-1" />
+                            <div className="w-px flex-grow bg-border flex-flow-line" />
+                            <ChevronDown className="w-4 h-4 -mt-2 text-muted-foreground" />
+                          </div>
+                        </div>
+                        <div className="px-6 flex gap-6">
+                          <div className="flex flex-col items-center">
+                            <ChevronDown className="w-4 h-4 -mb-2 text-muted-foreground rotate-180" />
+                            <div className="w-px flex-grow bg-border flex-flow-line" />
+                            <div className="w-2 h-2 rounded-full border border-border bg-transparent round-flow-icon" />
+                          </div>
+                        </div>
+                      </div>
+                      <section className={styles.frameworkCard}>
+                        <div className={styles.frameworkCardHeader}>Target Endpoint</div>
+                        <div className={styles.frameworkCardGrid}>
+                          <div className={styles.frameworkCol}>
+                            <div className={styles.frameworkColWithFlow}>
+                              <FlowIndicator direction="request" />
+                              <div className={styles.frameworkColContent}>
+                                <div className={styles.frameworkColTitle}>Request</div>
+                                {targetPath && renderFlowRow('pre-request', targetPath, 'PreFlow', 'target-req-pre')}
+                                {targetPath && renderFlowRow('post-request', targetPath, 'PostFlow', 'target-req-post')}
+                              </div>
+                            </div>
+                          </div>
+                          <div className={styles.frameworkCol}>
+                            <div className={styles.frameworkColWithFlow}>
+                              <FlowIndicator direction="response" />
+                              <div className={styles.frameworkColContent}>
+                                <div className={styles.frameworkColTitle}>Response</div>
+                                {targetPath && renderFlowRow('pre-response', targetPath, 'PreFlow', 'target-res-pre')}
+                                {targetPath && renderFlowRow('post-response', targetPath, 'PostFlow', 'target-res-post')}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                      <div className="relative pt-2 pb-6 w-[58%] ml-0">
+                        <div className="grid grid-cols-[1fr_1.5fr_1fr] absolute inset-x-0 top-0 h-8 pointer-events-none">
+                          <div className="relative">
+                            <div className="absolute left-[28px] right-0 border-l border-b border-solid border-zinc-300 rounded-bl-xl h-6" />
+                            <ChevronRight className="w-4 h-4 text-zinc-300 absolute right-[-8px] top-[16px] group-hover:text-primary transition-colors" />
+                          </div>
+                          <div className="flex items-center justify-center relative z-10 pt-2">
+                            <div className="flex items-center gap-3 px-1 py-2 rounded-full border border-zinc-700/50 bg-[#1e2235]/40 backdrop-blur-sm shadow-[0_0_15px_-3px_rgba(0,0,0,0.3)] ring-1 ring-white/5 group transition-all hover:bg-[#1e2235]/60 hover:border-zinc-500/50">
+                              <Layers className="w-4 h-4 text-zinc-400 group-hover:text-zinc-200 transition-colors shrink-0" />
+                              <span className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-100/90 group-hover:text-white transition-colors">Backend Service</span>
+                            </div>
+                          </div>
+                          <div className="relative">
+                            <div className="absolute right-[28px] left-0 border-r border-b border-solid border-zinc-300 rounded-br-xl h-6" />
+                            <ChevronDown className="w-4 h-4 text-zinc-300 absolute right-[20px] top-[-7px] rotate-180 group-hover:text-primary transition-colors" />
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
+
+          <div className={styles.codeSection}>
+            <div className={styles.topbar} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', zIndex: 1 }}>
+              <span>Editing:</span>
+              <span className={styles.path}>{currentPath || '(none)'}</span>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                {isPolicyFile && policyDocInfo && (
+                  <a href={policyDocInfo.url} target="_blank" rel="noreferrer"
+                    title={policyDocInfo.label}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--muted)',
+                      padding: 4,
+                      borderRadius: 6,
+                      transition: 'color 0.2s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+                    onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+                  >
+                    <Book className="w-4 h-4" />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setCollapseTop(prev => !prev) }}
+                  title={collapseTop ? 'Restore Editor' : 'Maximize Editor'}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--muted)',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+                  onMouseLeave={e => e.currentTarget.style.color = 'var(--muted)'}
+                >
+                  {collapseTop ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Editor area */}
+            <div
+              className={styles.split}
+              ref={editorWrapRef}
+              title={collapseTop ? 'Editor expanded — click outside to restore top panel' : 'Click to expand editor'}
+              onClick={() => { if (!collapseTop) setCollapseTop(true) }}
+              style={{ cursor: collapseTop ? 'default' : 'zoom-in' }}
+            >
+              <div className={styles.editorHost}>
+                <Editor
+                  height="100%"
+                  language={editorLanguage}
+                  value={editorValue}
+                  onChange={(v) => { if (!currentPath) return; setFileContent(currentPath, v ?? '') }}
+                  options={{ theme: 'vs-dark', minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true, fontSize: 13, tabSize: 2 }}
+                />
+              </div>
+            </div>
+
+            <div className={styles.statusbar}>
+              <span className={`${styles.status} ${styles[status.kind]}`}>{status.msg}</span>
+            </div>
+          </div>
+        </main>
+      </div >
+
+      {showAI && (
+        <ResourceAIAssistance
+          isOpen={showAI}
+          onOpenChange={setShowAI}
+          isMinimized={aiMinimized}
+          onMinimize={() => setAiMinimized(true)}
+          onMaximize={() => setAiMinimized(false)}
+          onClose={() => setShowAI(false)}
+        />
+      )}
+
+      {/* Policy creator modal */}
+      {
+        policyDlg.open && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.7)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1100,
+              backdropFilter: 'blur(4px)'
+            }}
+            onClick={() => {
+              setPolicyDlg(s => ({ ...s, open: false }));
+              setPolicyAttach(null);
+              setSelectedPolicyLib(null);
+              setPolicySearch('');
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: 600,
+                maxWidth: '94vw',
+                background: '#161b26',
+                border: '1px solid #2d3748',
+                borderRadius: 14,
+                overflow: 'hidden',
+                animation: 'mIn 0.2s ease'
+              }}
+            >
+              <div
+                style={{
+                  padding: '18px 22px',
+                  borderBottom: '1px solid #2d3748',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Add Policy
+                </div>
+                <button
+                  onClick={() => {
+                    setPolicyDlg(s => ({ ...s, open: false }));
+                    setPolicyAttach(null);
+                    setSelectedPolicyLib(null);
+                    setPolicySearch('');
+                  }}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: 20,
+                    lineHeight: 1,
+                    padding: 4
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ padding: '20px 22px' }}>
+                <input
+                  type="text"
+                  className="form-inp"
+                  placeholder="Search all policies…"
+                  value={policySearch}
+                  onChange={e => filterPolicyLib(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    background: '#0f121a',
+                    border: '1px solid #2d3748',
+                    borderRadius: 8,
+                    color: '#e2e8f0',
+                    fontSize: 12,
+                    marginBottom: 14,
+                    outline: 'none'
+                  }}
+                />
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 6,
+                    maxHeight: 360,
+                    overflowY: 'auto',
+                    paddingRight: 4
+                  }}
+                >
+                  {renderPolicyLibraryInline(policySearch, selectedPolicyLib, setSelectedPolicyLib)}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '14px 22px',
+                  borderTop: '1px solid #2d3748',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 8
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setPolicyDlg(s => ({ ...s, open: false }));
+                    setPolicyAttach(null);
+                    setSelectedPolicyLib(null);
+                    setPolicySearch('');
+                  }}
+                  style={{
+                    padding: '10px 14px',
+                    border: '1px solid #2d3748',
+                    background: '#161b26',
+                    color: '#e2e8f0',
+                    borderRadius: 8,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddSelectedPolicy}
+                  style={{
+                    padding: '10px 16px',
+                    border: 'none',
+                    background: '#f97316',
+                    color: '#fff',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  Add Policy
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+        // policyDlg.open && (
+        //   <div role="dialog" aria-modal="true"
+        //     style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        //     onClick={() => { setPolicyDlg(s => ({ ...s, open: false })); setPolicyAttach(null) }}
+        //   >
+        //     <div onClick={(e) => e.stopPropagation()} style={{ width: 420, background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+        //       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        //         <strong>New Policy</strong>
+        //         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        //           {isKongKonnect && (
+        //             <div style={{ display: 'flex', gap: 4, background: 'var(--bg)', borderRadius: 6, padding: 2 }}>
+        //               <button
+        //                 onClick={() => setPolicyDlg(s => ({ ...s, mode: 'apigee', type: firstType, name: `${getPolicyPrefix(firstType)}-` }))}
+        //                 style={{
+        //                   padding: '4px 10px',
+        //                   fontSize: 11,
+        //                   fontWeight: 500,
+        //                   border: 'none',
+        //                   borderRadius: 4,
+        //                   cursor: 'pointer',
+        //                   background: policyDlg.mode === 'apigee' ? 'var(--primary)' : 'transparent',
+        //                   color: policyDlg.mode === 'apigee' ? 'white' : 'var(--muted)',
+        //                   transition: 'all 0.2s'
+        //                 }}
+        //               >
+        //                 Apigee Policy
+        //               </button>
+        //               <button
+        //                 onClick={() => setPolicyDlg(s => ({ ...s, mode: 'kong', type: 'Global Plugin', name: kongPlugins[0] || '' }))}
+        //                 style={{
+        //                   padding: '4px 10px',
+        //                   fontSize: 11,
+        //                   fontWeight: 500,
+        //                   border: 'none',
+        //                   borderRadius: 4,
+        //                   cursor: 'pointer',
+        //                   background: policyDlg.mode === 'kong' ? 'var(--primary)' : 'transparent',
+        //                   color: policyDlg.mode === 'kong' ? 'white' : 'var(--muted)',
+        //                   transition: 'all 0.2s'
+        //                 }}
+        //               >
+        //                 Kong Plugin
+        //               </button>
+        //             </div>
+        //           )}
+        //           <button onClick={() => { setPolicyDlg(s => ({ ...s, open: false })); setPolicyAttach(null) }} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
+        //         </div>
+        //       </div>
+        //       <label style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+        //         <span style={{ fontSize: 12, opacity: .8 }}>Type</span>
+        //         {policyDlg.mode === 'kong' ? (
+        //           <input
+        //             value="Global Plugin"
+        //             disabled
+        //             style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--muted)', borderRadius: 8, cursor: 'not-allowed' }}
+        //           />
+        //         ) : (
+        //           <select value={policyDlg.type} onChange={(e) => setPolicyDlg(s => ({ ...s, type: e.target.value, name: `${getPolicyPrefix(e.target.value)}-` }))} style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}>
+        //             {Object.values(POLICY_CATALOG).flat().map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+        //           </select>
+        //         )}
+        //       </label>
+        //       <label style={{ display: 'grid', gap: 6 }}>
+        //         <span style={{ fontSize: 12, opacity: .8 }}>Name</span>
+        //         {policyDlg.mode === 'kong' ? (
+        //           loadingKongPlugins ? (
+        //             <div style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--muted)', borderRadius: 8, fontSize: 13 }}>
+        //               Loading plugins...
+        //             </div>
+        //           ) : (
+        //             <select
+        //               value={policyDlg.name}
+        //               onChange={(e) => setPolicyDlg(s => ({ ...s, name: e.target.value }))}
+        //               style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}
+        //             >
+        //               {kongPlugins.length === 0 ? (
+        //                 <option value="">No plugins available</option>
+        //               ) : (
+        //                 kongPlugins.map(plugin => (
+        //                   <option key={plugin} value={plugin}>{plugin}</option>
+        //                 ))
+        //               )}
+        //             </select>
+        //           )
+        //         ) : (
+        //           <input ref={policyNameRef} value={policyDlg.name} onChange={handlePolicyNameInput} style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }} />
+        //         )}
+        //       </label>
+        //       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+        //         <button onClick={() => { setPolicyDlg(s => ({ ...s, open: false })); setPolicyAttach(null) }} style={{ padding: '10px 14px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}>Cancel</button>
+        //         <button onClick={onCreatePolicy} className="primary" style={{ padding: '10px 16px', borderRadius: 8 }}>Create</button>
+        //       </div>
+        //     </div>
+        //   </div>
+        // )
+      }
+
+      {/* Rename Revision modal */}
+      {/*
+        renameDlg.open && (
+          <div role="dialog" aria-modal="true"
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+            onClick={() => setRenameDlg({ open: false, revId: null, name: '' })}
+          >
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 440, background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <strong>Rename Revision</strong>
+                <button onClick={() => setRenameDlg({ open: false, revId: null, name: '' })} style={{ border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', fontSize: 18 }}>×</button>
+              </div>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12, opacity: .8 }}>New name</span>
+                <input
+                  autoFocus
+                  value={renameDlg.name}
+                  onChange={(e) => setRenameDlg(s => ({ ...s, name: e.target.value }))}
+                  style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}
+                />
+              </label>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+                <button onClick={() => setRenameDlg({ open: false, revId: null, name: '' })} style={{ padding: '10px 14px', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', borderRadius: 8 }}>Cancel</button>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    const id = renameDlg.revId
+                    const nm = (renameDlg.name || '').trim()
+                    if (!id || !nm) { setRenameDlg({ open: false, revId: null, name: '' }); return }
+                    setRevisions(prev => prev.map(r => r.id === id ? { ...r, name: nm } : r))
+                    if (selectedRevisionId === id) setStatus({ kind: 'ok', msg: `Renamed to ${nm}` })
+                    setRenameDlg({ open: false, revId: null, name: '' })
+                  }}
+                  style={{ padding: '10px 16px', borderRadius: 8 }}
+                >Save</button>
+              </div>
+            </div>
+          </div>
+        )
+      */}
+
+      {/* Deploy modal */}
+      <DeployModal />
+
+      {/* Scoped styles for Proxy Editor only */}
+      <style>{`
+        .${styles.proxyEditor} {
+          --bg:#0b0e14; --panel:#161b26; --sidebar:#0f121a; --header:#161b26; --text:#e2e8f0; --muted:#94a3b8; --border:#2d3748; --primary:#ff6b35;
+          --chip-bg:#1e2636; --chip-border:#2d3748; --chip-hover:#243045; --lane-dash:#2d3748; --lane-bg:#101722;
+          --verb-get:#3fb950; --verb-post:#2f81f7; --verb-put:#a371f7; --verb-delete:#f85149; --verb-patch:#d29922;
+          --cond:#fb923c;
+        }
+        .${styles.proxyEditor} .app-grid { display:grid; grid-template-rows:auto 1fr; grid-template-columns:auto 1fr; grid-template-areas:"header header" "sidebar main"; background:var(--bg); height:100%; }
+        .${styles.proxyEditor} .${styles.main} { height:100%; display:flex; flex-direction:row; min-height:0; }
+        .${styles.proxyEditor} .${styles.flowSection} { flex: 0 0 ${bundleType === 'sharedflow' ? '33.333%' : '60%'}; min-width:0; min-height:0; overflow:auto; }
+        .${styles.proxyEditor} .${styles.codeSection} { flex: 1 1 ${bundleType === 'sharedflow' ? '66.667%' : '40%'}; min-width:0; min-height:0; display:flex; flex-direction:column; }
+        .${styles.proxyEditor} .app-header { grid-area: header; display:flex; align-items:center; padding:10px 16px; background:var(--header); border-bottom:1px solid var(--border); z-index:3; }
+        .${styles.proxyEditor} .sidebar { grid-area: sidebar; display:flex; flex-direction:column; border-right:1px solid var(--border); background:var(--sidebar);
+                   width:360px; min-width:280px; max-width:600px; resize: horizontal; overflow:auto; z-index:2; }
+        .${styles.proxyEditor} .toolbar.sticky { position: sticky; top: 0; background: var(--panel); z-index: 2; }
+        .${styles.proxyEditor} .item { padding:7px 12px; border-radius:8px; cursor:pointer; display:flex; align-items:center; gap:6px; color:var(--text); }
+        .${styles.proxyEditor} .item:hover { background:color-mix(in srgb, var(--primary) 12%, transparent); }
+        .${styles.proxyEditor} .item.active { background:color-mix(in srgb, var(--primary) 14%, transparent); border-left:2px solid var(--primary); }
+        .${styles.proxyEditor} .item.muted { opacity:.8; cursor:default; }
+        .${styles.proxyEditor} .icon-btn { border:1px solid var(--border); background:var(--panel); color:var(--text); padding:0 6px; border-radius:6px; cursor:pointer; }
+        .${styles.proxyEditor} .icon-btn:hover { border-color:var(--primary); color:var(--primary); }
+        .${styles.proxyEditor} .chip button { border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; line-height:1; }
+        .${styles.proxyEditor} .lane-header { margin-bottom: 8px; }
+        .${styles.proxyEditor} .lane-header-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 8px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+        .${styles.proxyEditor} .lane-header-request {
+          background: linear-gradient(90deg, #f97316, #fb923c);
+          color: #fff;
+        }
+        .${styles.proxyEditor} .lane-header-response {
+          background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+          color: #fff;
+        }
+        .${styles.proxyEditor} .lane-header .${styles.laneLabel} {
+          margin-bottom: 0;
+        }
+        .${styles.proxyEditor} .lane-header .icon-btn {
+          font-size: 12px;
+          border-color: transparent;
+          background: rgba(15,23,42,0.18);
+          color: inherit;
+        }
+        .${styles.proxyEditor} .lane-header .icon-btn:hover {
+          border-color: rgba(15,23,42,0.35);
+          background: rgba(15,23,42,0.28);
+        }
+        .${styles.proxyEditor} .full-lane { grid-template-columns: 1fr; }
+        .${styles.proxyEditor} a { color:inherit }
+        .${styles.proxyEditor} .pill{
+          display:inline-block; padding:2px 6px; border:1px solid var(--border);
+          border-radius:999px; font-size:11px; line-height:1; opacity:.95;
+        }
+        .${styles.proxyEditor} .pill-cond { color: var(--cond); border-color: var(--cond); background: rgba(225,155,46,.12); }
+        .${styles.proxyEditor} .pill-get    { color: var(--verb-get);    border-color: var(--verb-get);    background: rgba(63,185,80,.08); }
+        .${styles.proxyEditor} .pill-post   { color: var(--verb-post);   border-color: var(--verb-post);   background: rgba(47,129,247,.10); }
+        .${styles.proxyEditor} .pill-put    { color: var(--verb-put);    border-color: var(--verb-put);    background: rgba(163,113,247,.10); }
+        .${styles.proxyEditor} .pill-delete { color: var(--verb-delete); border-color: var(--verb-delete); background: rgba(248,81,73,.10); }
+        .${styles.proxyEditor} .pill-patch  { color: var(--verb-patch);  border-color: var(--verb-patch);  background: rgba(210,153,34,.12); }
+        .${styles.proxyEditor} .pill-all    { color: var(--muted);       border-color: var(--chip-border); background: var(--chip-bg); }
+        .${styles.proxyEditor} .env-pill { font-size:12px; padding:2px 6px; border:1px solid var(--chip-border); background:var(--chip-bg); border-radius:999px; }
+        .${styles.proxyEditor} button.primary {
+          border: 1px solid var(--primary);
+          background: var(--primary);
+          color: var(--on-primary, #fff);
+          font-weight: 700;
+        }
+        .${styles.proxyEditor} button.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+        @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+      `}</style>
+    </div >
+  )
+}
+
+/* ---- small presentational helpers ---- */
+function Folder({ label, open, onToggle, action, children }) {
+  return (
+    <>
+      <div className="folder" style={{ cursor: 'pointer', marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+        <span onClick={onToggle}><span style={{ display: 'inline-block', width: 16 }}>{open ? '▾' : '▸'}</span></span>
+        <span onClick={onToggle}>{label}</span>
+        {action && <button type="button" className="icon-btn" onClick={(e) => { e.stopPropagation(); action.onClick?.() }} style={{ marginLeft: 'auto', padding: 4, minWidth: 20, minHeight: 20, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{action.label}</button>}
+      </div>
+      {open && <div>{children}</div>}
+    </>
+  )
+}
+function Item({ active, muted, onClick, children, ...rest }) {
+  return (
+    <div className={`item ${muted ? 'muted' : ''} ${active ? 'active' : ''}`} onClick={onClick} {...rest}>{children}</div>
+  )
+}

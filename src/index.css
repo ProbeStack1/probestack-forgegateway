@@ -1,0 +1,354 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-140%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+
+/* ─── Gateway context badge (top-left) ─── */
+
+.gw-strip-wrap {
+  position: fixed;
+  top: 64px;
+  left: 0;
+  z-index: 40;
+  pointer-events: none;
+  transition: padding-left 0.3s ease-in-out;
+  animation: gw-strip-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+@media (min-width: 1024px) {
+  .gw-strip-wrap {
+    padding-left: 224px;   /* w-56 */
+  }
+  body.sidebar-collapsed .gw-strip-wrap {
+    padding-left: 64px;    /* w-16 */
+  }
+}
+
+@keyframes gw-strip-in {
+  from { opacity: 0; transform: translateX(-10px) scale(0.94); }
+  to   { opacity: 1; transform: translateX(0)     scale(1);    }
+}
+
+@keyframes gw-dot-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1);    }
+  50%       { opacity: 0.5; transform: scale(1.65); }
+}
+
+.gw-dot-pulse {
+  animation: gw-dot-pulse 2.4s ease-in-out infinite;
+}
+
+.gw-strip-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  margin: 8px 0 0 12px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.gw-strip-brand {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 8px;
+}
+
+@layer base {
+  :root {
+    /* Dark theme colors from api-test-tool-ui */
+    --color-header-bg: #0a0a2e;
+    --color-dark-900: #0a0a2e;
+    --color-dark-800: #15192b;
+    --color-dark-700: #232942;
+    --color-dark-600: #343b5c;
+    --color-dark-500: #575757;
+    --color-dark-400: #8890aa;
+    --color-primary: #ff5b1f;
+    --color-probestack-bg: #0e172a;
+
+    /* CSS variables for Tailwind */
+    --primary: #ff5b1f;
+    --primary-hover: #e54d17;
+    --secondary: #232942;
+    --secondary-hover: #343b5c;
+    --background: #0a0a2e;
+    --background-light: #15192b;
+    --background-card: #15192b;
+    --background-elevated: #232942;
+    --foreground: #ffffff;
+    --muted-foreground: #8890aa;
+    --muted: #232942;
+    --border: #343b5c;
+    --border-light: #232942;
+    --destructive: #ef4444;
+    --success: #22c55e;
+    --ring: #ff5b1f;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: #0e172a;
+    color: #ffffff;
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+  }
+}
+
+/* Font utilities */
+.font-heading {
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+.gradient-text {
+  background: linear-gradient(90deg, #ff5b1f, #ffb400 40%, #1fbf9a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@layer components {
+  .card-shadow {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+  .page-bg {
+    background: linear-gradient(180deg, #0a0a2e 0%, #0e172a 100%);
+    min-height: 100vh;
+  }
+}
+
+/* Sidebar layout — offset page content right of the fixed sidebar on desktop */
+@media (min-width: 1024px) {
+  body.with-sidebar {
+    padding-left: 224px;   /* w-56 */
+    transition: padding-left 0.3s ease-in-out;
+  }
+  body.with-sidebar.sidebar-collapsed {
+    padding-left: 64px;    /* w-16 */
+  }
+}
+
+/* Flyout entrance animation */
+@keyframes sidebar-flyout-in {
+  from { opacity: 0; transform: translateX(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0)  scale(1);    }
+}
+.sidebar-flyout {
+  animation: sidebar-flyout-in 0.14s ease-out forwards;
+  transform-origin: left center;
+}
+
+/* Thin custom scrollbar for sidebar nav */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 91, 31, 0.15) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 91, 31, 0.18);
+  border-radius: 4px;
+}
+
+.navbar-scrollbar{
+  scrollbar-width: 0;
+  scrollbar-color: transparent transparent;
+}
+
+/* Custom Checkbox Styling */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #343b5c;
+  border-radius: 3px;
+  background-color: #0a0a2e;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #ff5b1f;
+  border-color: #ff5b1f;
+}
+
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+input[type="checkbox"]:hover {
+  border-color: #ff5b1f;
+}
+
+/* Custom Radio Button Styling */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #343b5c;
+  border-radius: 50%;
+  background-color: #0a0a2e;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+}
+
+input[type="radio"]:checked {
+  background-color: #ff5b1f;
+  border-color: #ff5b1f;
+}
+
+input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: white;
+}
+
+input[type="radio"]:hover {
+  border-color: #ff5b1f;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a2e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #232942;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #343b5c;
+}
+
+/* Slide In Right Animation */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.4s ease-out forwards;
+}
+
+/* Microservice Creation Animation - Stacking Layers */
+@keyframes slideUp {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-8px);
+    opacity: 0.6;
+  }
+}
+
+/* Proxy Creation Animation - Network Flow */
+@keyframes flowRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(18px);
+    opacity: 0;
+  }
+}
+
+/* MCP Creation Animation - Puzzle Pieces Rotating */
+@keyframes rotatePuzzle {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.2) rotate(180deg);
+    opacity: 0.7;
+  }
+}
+
+
+
+
+/* css for governance */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out forwards;
+}

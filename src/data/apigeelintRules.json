@@ -1,0 +1,816 @@
+{
+  "apigeelintVersion": "2.85.1",
+  "generatedAt": "2026-07-14T08:14:06.919Z",
+  "rules": [
+    {
+      "ruleId": "BN001",
+      "ruleName": "Bundle Structure",
+      "ruleDescription": "Check bundle structure, bundles have a specific structure, extra folder or files may be problematic.",
+      "category": "Bundle",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN003",
+      "ruleName": "Cache Coherence",
+      "ruleDescription": "Cache strategies that rely on external cache population can be problematic and lead to run time errors.",
+      "category": "Bundle",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN005",
+      "ruleName": "Check for unattached policies",
+      "ruleDescription": "Unattached policies are dead code. They should be removed from bundles before releasing the bundle to produciton.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN006",
+      "ruleName": "Check number of policies present in the bundle",
+      "ruleDescription": "Large bundles can be problematic in development and difficult to maintain.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN007",
+      "ruleName": "Check number of resources present in the bundle as a gauge of bundle size",
+      "ruleDescription": "Large bundles are a symptom of poor design. A high number of resource callouts is indicative of underutilizing out of the box Apigee policies or over orchestration in the API tier.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN009",
+      "ruleName": "Check for multiple statistics collector policies",
+      "ruleDescription": "Only one Statistics Collector Policy will be executed.  Therefore, if you include mulitiple Statistics Collector Policies then you should have conditions on all but one.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN010",
+      "ruleName": "Missing policies",
+      "ruleDescription": "Missing policies will prevent bundle import.",
+      "category": "Bundle",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN011",
+      "ruleName": "Check for not well-formed XML",
+      "ruleDescription": "not well formed XML.",
+      "category": "Bundle",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN012",
+      "ruleName": "Check for unreferenced targets",
+      "ruleDescription": "Unreferenced targets are dead code; should be removed from bundles.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN013",
+      "ruleName": "Check for unreferenced resources",
+      "ruleDescription": "Unreferenced resources are dead code; should be removed from bundles.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "BN014",
+      "ruleName": "Check for duplicate policies",
+      "ruleDescription": "Multiple identically configured policies.",
+      "category": "Bundle",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC001",
+      "ruleName": "Literals in Conditionals",
+      "ruleDescription": "Single term literals statically evaluate to True or False and needlessly complicate a conditional at best, at worst they create dead code or are misleading in implying condtional execution.",
+      "category": "Conditional",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC003",
+      "ruleName": "Condition Length",
+      "ruleDescription": "Overly long conditions on Steps are difficult to debug and maintain.",
+      "category": "Conditional",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC004",
+      "ruleName": "Overly Complex Condition",
+      "ruleDescription": "Condition complexity should be limited to a relatively modest number of variables, constants, and comparators.",
+      "category": "Conditional",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC005",
+      "ruleName": "unterminatedStrings",
+      "ruleDescription": "Conditions should not include strings that are unterminated.",
+      "category": "Conditional",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC006",
+      "ruleName": "Detect Logical Absurdities",
+      "ruleDescription": "Conditions should not have internal logic conflicts.",
+      "category": "Conditional",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC007",
+      "ruleName": "Condition Syntax",
+      "ruleDescription": "",
+      "category": "Conditional",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "CC008",
+      "ruleName": "Uniqueness of conditions in Flows, FaultRules, and RouteRules",
+      "ruleDescription": "Each condition must be unique.  Error if duplicates.",
+      "category": "Conditional",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "DC001",
+      "ruleName": "ConcurrentRateLimit Policy Deprecation",
+      "ruleDescription": "Check usage of deprecated policy ConcurrentRateLimit.",
+      "category": "Deprecation",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "DC002",
+      "ruleName": "OAuth V1 Policies Deprecation",
+      "ruleDescription": "Check usage of deprecated OAuth V1 policies.",
+      "category": "Deprecation",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "EP001",
+      "ruleName": "Check for multiple CORS policies",
+      "ruleDescription": "Only one CORS Policy is necessary. It should attach in the Proxy Preflow.",
+      "category": "Endpoints",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "EP002",
+      "ruleName": "Check for commonly misplaced elements",
+      "ruleDescription": "For example, a Flow element should be a child of Flows parent.",
+      "category": "Endpoints",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "FE001",
+      "ruleName": "Check for use of Authentication element in ServiceCallout, ExternalCallout and TargetEndpoint",
+      "ruleDescription": "",
+      "category": "Features",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "FL001",
+      "ruleName": "Unconditional Flows",
+      "ruleDescription": "Only one unconditional flow will be executed.  Error if more than one detected.",
+      "category": "Flow",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "FR001",
+      "ruleName": "No Condition on FaultRule",
+      "ruleDescription": "With multiple FaultRules, all except one should have a condition statement.",
+      "category": "FaultRules",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "FR002",
+      "ruleName": "DefaultFaultRule Structure",
+      "ruleDescription": "DefaultFaultRule should have only supported child elements, at most one AlwaysEnforce element, and at most one Condition element.",
+      "category": "FaultRules",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "FR003",
+      "ruleName": "Single FaultRule",
+      "ruleDescription": "With a single FaultRule and no Condition, consider migrating to DefaultFaultRule.",
+      "category": "FaultRules",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD001",
+      "ruleName": "Missing targets",
+      "ruleDescription": "Check RouteRules in a ProxyEndpoint to ensure that the targets are known.",
+      "category": "Proxy Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD002",
+      "ruleName": "Unconditional Route Rule Structure",
+      "ruleDescription": "Check RouteRules in a ProxyEndpoint to ensure that one and only one has a blank set of conditions.",
+      "category": "Proxy Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD003",
+      "ruleName": "Unreachable Route Rules - empty conditions go last",
+      "ruleDescription": "Check RouteRules in a ProxyEndpoint to ensure that empty condition is last.",
+      "category": "Proxy Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD004",
+      "ruleName": "ProxyEndpoint Name",
+      "ruleDescription": "Check ProxyEndpoint name attribute against file name.",
+      "category": "Proxy Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD005",
+      "ruleName": "Unnecessary VirtualHost in X/hybrid",
+      "ruleDescription": "There should be no VirtualHost in a ProxyEndpoint for ApigeeX.",
+      "category": "Proxy Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PD006",
+      "ruleName": "ProxyEndpoint hygiene",
+      "ruleDescription": "Check ProxyEndpoint hygiene.",
+      "category": "Proxy Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO006",
+      "ruleName": "Check File and Policy Name attribute",
+      "ruleDescription": "Check that file names correspond to policy name attribute.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO007",
+      "ruleName": "Policy Naming Conventions - type indication",
+      "ruleDescription": "It is recommended that the policy name include an indicator of the policy type.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO008",
+      "ruleName": "Check File and DisplayName",
+      "ruleDescription": "Check that policy filename corresponds to policy DisplayName.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO012",
+      "ruleName": "AssignTo",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO013",
+      "ruleName": "jsHint",
+      "ruleDescription": "jsHint applied to all javascript resource callouts.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO018",
+      "ruleName": "Regular Expression Lookarounds",
+      "ruleDescription": "Regex Lookahead/Lookbehind are expensive, especially when applied to large text blocks, consider refactoring to a simpler regular expression.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO019",
+      "ruleName": "Check ServiceCallout for Request variable name",
+      "ruleDescription": "Using request for the Request name causes unexepcted side effects.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO020",
+      "ruleName": "Check ServiceCallout for Response variable name",
+      "ruleDescription": "Using response for the Response name causes unexepcted side effects.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO022",
+      "ruleName": "Nondistributed Quota",
+      "ruleDescription": "When using nondistributed quota the number of allowed calls is influenced by the number of Message Processors (MPs) deployed. This may lead to higher than expected transactions for a given quota as MPs autoscale.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO023",
+      "ruleName": "Quota Policy Reuse",
+      "ruleDescription": "When the same Quota policy is used more than once you must ensure that the conditions of execution are mutually exclusive or that you intend for a call to count more than once per message processed.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO024",
+      "ruleName": "Cache Error Responses",
+      "ruleDescription": "By default the ResponseCache policy will cache non 200 responses. Either create a condition or use policy configuration options to exclude non 200 responses.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO025",
+      "ruleName": "esLint",
+      "ruleDescription": "esLint applied to all javascript resources.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO026",
+      "ruleName": "AssignVariableUsage",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO027",
+      "ruleName": "HMACUsage",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO028",
+      "ruleName": "Policy Availability in profile",
+      "ruleDescription": "Some policies are available only in some profiles",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO029",
+      "ruleName": "Policy type is known",
+      "ruleDescription": "That policy type is not recognized",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO030",
+      "ruleName": "ExpirySettings",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO031",
+      "ruleName": "AM/ContentType",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO032",
+      "ruleName": "CORS/hygiene",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO033",
+      "ruleName": "Check ExtractVariables hygiene",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO034",
+      "ruleName": "Check for element placement within AssignMessage",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO035",
+      "ruleName": "Check for element placement within Quota",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO036",
+      "ruleName": "Check ServiceCallout for Response element",
+      "ruleDescription": "There should be a simple text value in the Response element for the ServiceCallout policy.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO037",
+      "ruleName": "Check for Source in DataCapture policies",
+      "ruleDescription": "Source should be explicit in DataCapture policy, in some cases.",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO038",
+      "ruleName": "KVM/MapName",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO039",
+      "ruleName": "Check MessageLogging / CloudLogging hygiene",
+      "ruleDescription": "In the MessageLogging policy, the CloudLogging element should use correct hygiene.",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO040",
+      "ruleName": "Check ExtractVariables JSONPaths",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO041",
+      "ruleName": "Check KeyValueMapOperations ExclusiveCache usage",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO042",
+      "ruleName": "Check for element placement within SpikeArrest",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO043",
+      "ruleName": "Check ServiceCallout SSLInfo usage",
+      "ruleDescription": "There should be only valid child elements of SSLInfo",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO044",
+      "ruleName": "Check for element placement within GenerateJWT",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "PO045",
+      "ruleName": "Check for element placement within SetOAuthV2Info",
+      "ruleDescription": "",
+      "category": "Policy",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST001",
+      "ruleName": "Empty Steps",
+      "ruleDescription": "Empty steps clutter a bundle. Performance is not degraded.",
+      "category": "Step",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST002",
+      "ruleName": "Step Structure",
+      "ruleDescription": "Steps with doubled elements or unsupported elements are wrong.",
+      "category": "Step",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST003",
+      "ruleName": "Extract Variables with JSONPayload",
+      "ruleDescription": "A check for a body element must be performed before policy execution.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST004",
+      "ruleName": "Extract Variables with XMLPayload",
+      "ruleDescription": "A check for a body element must be performed before policy execution.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST005",
+      "ruleName": "Extract Variables with FormParam",
+      "ruleDescription": "For the ExtractVariables step, an appropriate check for a message body was not found on the enclosing Step or Flow.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST006",
+      "ruleName": "JSONThreatProtection check for body",
+      "ruleDescription": "A check for a body element should be performed before policy execution.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST007",
+      "ruleName": "XMLThreatProtection check for body",
+      "ruleDescription": "A check for a body element should be performed before policy execution.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "ST008",
+      "ruleName": "Unreachable Steps after RaiseFault",
+      "ruleDescription": "Steps in the same flow after a RaiseFault cannot be reached.",
+      "category": "Step",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD001",
+      "ruleName": "Discourage accessing management server from a proxy.",
+      "ruleDescription": "Management server is intended for administrative tasks.",
+      "category": "Target Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD002",
+      "ruleName": "Discourage use of direct URLs in Target Server.",
+      "ruleDescription": "Using a Target Server simplifies CI/CD.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD003",
+      "ruleName": "TargetEndpoint Name",
+      "ruleDescription": "Check TargetEndpoint name attribute against file name.",
+      "category": "Target Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD004",
+      "ruleName": "TargetEndpoint HTTPTargetConnection SSLInfo should use Enabled and Enforce correctly",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection SSLInfo should use Enabled and Enforce correctly.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD005",
+      "ruleName": "TargetEndpoint SSLInfo references",
+      "ruleDescription": "TargetEndpoint SSLInfo should use reference within TrustStore or KeyStore.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD006",
+      "ruleName": "TargetEndpoint HTTPTargetConnection SSLInfo with LoadBalancer",
+      "ruleDescription": "Configure SSLInfo in the TargetServer, even if SSLInfo is also present under HTTPTargetConnection",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD007",
+      "ruleName": "TargetEndpoint HTTPTargetConnection SSLInfo TrustStore",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection should use TrustStore with SSLInfo.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD008",
+      "ruleName": "TargetEndpoint HTTPTargetConnection LoadBalancer with multiple fallback entries",
+      "ruleDescription": "Multiple Server entries with IsFallback=true",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD009",
+      "ruleName": "TargetEndpoint HTTPTargetConnection should have at most one LoadBalancer",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection should not have more than one LoadBalancer.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD010",
+      "ruleName": "TargetEndpoint HTTPTargetConnection LoadBalancer with duplicate Server elements",
+      "ruleDescription": "Duplicate Server elements found within LoadBalancer.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD011",
+      "ruleName": "TargetEndpoint HTTPTargetConnection SSLInfo should not ignore errors",
+      "ruleDescription": "SSLInfo configuration includes IgnoreValidationErrors = true",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD012",
+      "ruleName": "TargetEndpoint HTTPTargetConnection should have exactly one SSLInfo",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection should have exactly one SSLInfo",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD013",
+      "ruleName": "TargetEndpoint HTTPTargetConnection SSLInfo ClientAuthEnabled hygiene",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection SSLInfo ClientAuthEnabled hygiene",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD014",
+      "ruleName": "TargetEndpoint HTTPTargetConnection URL and LoadBalancer",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection should have exactly one of {URL, LoadBalancer}",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD015",
+      "ruleName": "TargetEndpoint HTTPTargetConnection LoadBalancer should specify MaxFailures.",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection LoadBalancer should specify MaxFailures.",
+      "category": "Target Definition",
+      "severity": "RECOMMENDED",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD016",
+      "ruleName": "Check TargetEndpoint HTTPTargetConnection HealthMonitor with LoadBalancer.",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection should not use HealthMonitor without LoadBalancer.",
+      "category": "Target Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    },
+    {
+      "ruleId": "TD017",
+      "ruleName": "TargetEndpoint HTTPTargetConnection URL should be non-empty",
+      "ruleDescription": "TargetEndpoint HTTPTargetConnection URL should be non-empty",
+      "category": "Target Definition",
+      "severity": "MANDATORY",
+      "enabled": true,
+      "status": "ACTIVE"
+    }
+  ]
+}

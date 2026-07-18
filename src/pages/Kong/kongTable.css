@@ -1,0 +1,165 @@
+.kong-table-wrap {
+  max-height: clamp(260px, calc(100vh - 365px), 620px);
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.46));
+  scrollbar-color: rgba(71, 85, 105, 0.75) transparent;
+  scrollbar-width: thin;
+}
+
+.kong-table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.kong-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kong-table-wrap::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(15, 23, 42, 0.92);
+  border-radius: 999px;
+  background: rgba(71, 85, 105, 0.85);
+}
+
+.kong-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.95);
+}
+
+.kong-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.875rem;
+}
+
+.kong-table thead {
+  background: rgba(17, 24, 39, 0.9);
+}
+
+.kong-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 14px 16px;
+  background: rgba(17, 24, 39, 0.96);
+  color: #9db1d4;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.kong-table th:last-child,
+.kong-table td:last-child {
+  width: 132px;
+  min-width: 132px;
+}
+
+.kong-table td {
+  padding: 14px 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  color: #eef4ff;
+  vertical-align: middle;
+}
+
+.kong-table td.flex {
+  display: table-cell;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.kong-table td.flex > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.46);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.kong-table td.flex > button:hover {
+  border-color: rgba(255, 91, 31, 0.36);
+  background: rgba(255, 91, 31, 0.08);
+  transform: translateY(-1px);
+}
+
+.kong-table td span[class*="bg-slate-700"],
+.kong-table td span[class*="bg-gray-700"] {
+  display: inline-flex;
+  max-width: min(100%, 220px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.kong-table tbody tr {
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.kong-table tbody tr:hover {
+  background: rgba(30, 41, 59, 0.32);
+}
+
+.kong-table-empty {
+  padding: 28px 16px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.kong-table-error {
+  padding: 28px 16px;
+  color: #f87171;
+  text-align: center;
+}
+
+.kong-skeleton {
+  height: 14px;
+  min-width: 46px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(51, 65, 85, 0.42), rgba(148, 163, 184, 0.28), rgba(51, 65, 85, 0.42));
+  background-size: 220% 100%;
+  animation: kong-shimmer 1.15s ease-in-out infinite;
+}
+
+@keyframes kong-shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+.kong-source-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 132px;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kong-source-badge--forge {
+  border: 1px solid rgba(45, 212, 191, 0.36);
+  background: rgba(20, 184, 166, 0.12);
+  color: #5eead4;
+}
+
+.kong-source-badge--kong {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(51, 65, 85, 0.34);
+  color: #cbd5e1;
+}

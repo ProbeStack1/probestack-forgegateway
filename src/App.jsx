@@ -89,8 +89,8 @@ function AuthHandler() {
       }
 
       // 3. No auth found – redirect to login page
-      // window.location.href = 'https://probestack.io/login';
-       setLoading(false);
+      window.location.href = 'https://probestack.io/login';
+      //  setLoading(false);
     };
 
     handleAuth();

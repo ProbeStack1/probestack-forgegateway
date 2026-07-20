@@ -360,7 +360,7 @@ export default function Header({ activePage, hideNav = false }) {
         {/* Logo Section */}
         <div
           className="flex min-w-0 items-center gap-2 shrink-0 w-auto cursor-pointer hover:opacity-80 transition-opacity"
-          onClick={() => navigate('/')}
+          onClick={() => { window.location.href = 'https://forgesphere.probestack.io'; }}
         >
           <img
             src="/assets/justlogo.png"
@@ -373,7 +373,7 @@ export default function Header({ activePage, hideNav = false }) {
               ProbeStack
             </span>
             <span className="text-lg sm:text-xl font-extrabold gradient-text font-heading whitespace-nowrap leading-tight">
-              ForgeSphere
+              ForgeGateway
             </span>
           </div>
         </div>

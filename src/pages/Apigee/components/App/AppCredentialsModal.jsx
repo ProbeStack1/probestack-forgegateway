@@ -526,7 +526,17 @@ export default function AppCredentialsModal({
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
         <div className="w-full max-w-3xl rounded-xl border border-dark-700 bg-[#15192b] shadow-xl">
           <div className="flex items-center justify-between border-b border-dark-700 px-5 py-4">
-            <div><h3 className="text-base font-semibold text-white">App Credentials</h3><p className="text-xs text-gray-400">{data?.name || "Fetched from Apigee"}</p></div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold text-white">App Credentials</h3>
+                {data?.status && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${data.status.toLowerCase() === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                    {formatValue(data.status)}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">{data?.name || "Fetched from Apigee"}</p>
+            </div>
             <div className="flex items-center gap-2">
               <button onClick={() => setShowAddModal(true)} className="rounded-lg flex items-center gap-2 bg-orange-600 px-2 py-2 text-sm text-white hover:bg-orange-700"><Plus size={14} /> Add Credential</button>
               <button onClick={onClose} className="rounded-md p-2 text-gray-400 hover:bg-dark-700 hover:text-white"><X size={16} /></button>
@@ -579,11 +589,20 @@ export default function AppCredentialsModal({
                         <div className="border-t border-dark-700 px-4 py-3">
                           <p className="mb-2 text-sm text-gray-400">API Products</p>
                           <div className="flex flex-wrap gap-2">
-                            {credential.apiProducts.map((product, productIndex) => (
-                              <span key={`${formatValue(product?.apiproduct || product?.name || product)}-${productIndex}`} className="rounded-full border border-dark-600 bg-[#0f172a] px-2 py-1 text-xs text-gray-200">
-                                {formatValue(product?.apiproduct || product?.name || product)}
-                              </span>
-                            ))}
+                            {credential.apiProducts.map((product, productIndex) => {
+                              const productName = formatValue(product?.apiproduct || product?.name || product);
+                              const productStatus = product?.status;
+                              return (
+                                <span key={`${productName}-${productIndex}`} className="inline-flex items-center gap-1.5 rounded-full border border-dark-600 bg-[#0f172a] px-2 py-1 text-xs text-gray-200">
+                                  {productName}
+                                  {productStatus && (
+                                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${productStatus.toLowerCase() === "approved" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                                      {formatValue(productStatus)}
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

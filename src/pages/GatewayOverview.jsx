@@ -275,12 +275,12 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             )}
           >
             <button
-              onClick={() => navigate("/")}
+              onClick={() => { window.location.href = "https://forgesphere.probestack.io"; }}
               className="flex min-w-0 items-center gap-2 text-left transition-opacity hover:opacity-85"
             >
               <img
                 src="/assets/justlogo.png"
-                alt="ForgeSphere logo"
+                alt="ForgeGateway logo"
                 className="h-11 w-auto flex-shrink-0"
                 onError={(e) => {
                   e.currentTarget.onerror = null;
@@ -291,7 +291,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                 <span className="flex min-w-0 flex-col justify-center">
                   <span className="text-[0.65rem] leading-tight text-gray-400">ProbeStack</span>
                   <span className="truncate text-xl font-extrabold leading-tight gradient-text font-heading">
-                    ForgeSphere
+                    ForgeGateway
                   </span>
                 </span>
               )}

@@ -521,10 +521,13 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
               borderRight: '1px solid rgba(255,255,255,0.08)',
             }}
           >
-            <div className="flex items-center gap-2 border-b border-white/[0.07] px-4 py-3">
+            <div
+              className="flex items-center gap-2 border-b border-white/[0.07] px-4 py-3 cursor-pointer hover:opacity-85 transition-opacity"
+              onClick={() => { window.location.href = 'https://forgesphere.probestack.io'; }}
+            >
               <img
                 src="/assets/justlogo.png"
-                alt="ForgeSphere"
+                alt="ForgeGateway"
                 className="h-8 w-auto"
                 onError={(e) => { e.target.onerror = null; e.target.src = '/logo.png'; }}
               />
@@ -539,7 +542,7 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
                     color: 'transparent',
                   }}
                 >
-                  ForgeSphere
+                  ForgeGateway
                 </span>
               </div>
             </div>

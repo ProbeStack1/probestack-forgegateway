@@ -299,7 +299,7 @@ const KeyRotationModal = ({ isOpen, onClose, onRotate, credential, allProducts =
   const [dateError, setDateError] = useState("");
   const [products, setProducts] = useState(() => {
     const current = credential?.apiProducts || [];
-    return current.map(p => ({ name: p.apiproduct || p.name, status: p.status || "APPROVED" }));
+    return current.map(p => ({ name: p.apiproduct || p.name, status: (p.status || "APPROVED").toUpperCase() }));
   });
   const [selectedProductNames, setSelectedProductNames] = useState([]);
   const [selectAll, setSelectAll] = useState(false);

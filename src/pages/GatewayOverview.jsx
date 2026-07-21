@@ -207,7 +207,11 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
 
   // Sidebar state
   const [selectedMenuItem, setSelectedMenuItem] = useState("gateway-onboarding");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem('fs_gateway_sidebar_pinned') === 'true'; } catch { return false; }
+  });
+  const [hovering, setHovering] = useState(false);
+  const [suppressHover, setSuppressHover] = useState(false);
   const [sectionsExpanded, setSectionsExpanded] = useState({
     proxyDev: true,
     distribution: true,
@@ -228,6 +232,27 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
       setSelectedMenuItem(menuFromPath);
     }
   }, [location.pathname, selectedMenuItem]);
+
+  useEffect(() => {
+    try { localStorage.setItem('fs_gateway_sidebar_pinned', pinned); } catch {}
+  }, [pinned]);
+
+  const handleSidebarMouseEnter = () => setHovering(true);
+  const handleSidebarMouseLeave = () => {
+    setHovering(false);
+    setSuppressHover(false);
+  };
+
+  const handlePinClick = () => setPinned(true);
+  const handleUnpinClick = () => {
+    setPinned(false);
+    setSuppressHover(true); // collapses immediately even if still hovering
+  };
+
+  const expanded = pinned || (hovering && !suppressHover);
+  const sidebarCollapsed = !expanded;
+
+  const toggleSidebarPin = () => (pinned ? handleUnpinClick() : handlePinClick());
 
   const selectSidebarMenu = (menuItem) => {
     setSelectedMenuItem(menuItem);
@@ -254,57 +279,24 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
     "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 transition-colors hover:text-slate-300";
 
   return (
-    <div className="flex h-full min-h-0 bg-[#0b0e16]">
+    <div className="flex h-full min-h-0 flex-col bg-[#0b0e16]">
+      {showHeader && <GatewayHeader />}
+      <div className="flex min-h-0 flex-1">
       {/* ==================== SIDEBAR ==================== */}
       <aside
+        onMouseEnter={handleSidebarMouseEnter}
+        onMouseLeave={handleSidebarMouseLeave}
         className={`h-full shrink-0 rounded-r-2xl border-r border-[#24304d] bg-[linear-gradient(180deg,#101827_0%,#0b111d_100%)] flex flex-col shadow-[18px_0_45px_-35px_rgba(0,0,0,0.95)] transition-all duration-300 ${
           sidebarCollapsed ? "w-20" : "w-72"
         }`}
       >
-        {/* Logo & Collapse Button */}
+        {/* Collapse / Pin toggle */}
         <div
           className={cn(
-            "border-b border-[#24304d] px-4 py-4",
-            sidebarCollapsed ? "flex flex-col items-center gap-3" : "space-y-4"
+            "flex items-center border-b border-[#24304d] px-4 py-4",
+            sidebarCollapsed ? "justify-center" : "justify-between"
           )}
         >
-          <div
-            className={cn(
-              "flex items-center gap-3",
-              sidebarCollapsed ? "justify-center" : "justify-between"
-            )}
-          >
-            <button
-              onClick={() => { window.location.href = "https://forgesphere.probestack.io"; }}
-              className="flex min-w-0 items-center gap-2 text-left transition-opacity hover:opacity-85"
-            >
-              <img
-                src="/assets/justlogo.png"
-                alt="ForgeGateway logo"
-                className="h-11 w-auto flex-shrink-0"
-                onError={(e) => {
-                  e.currentTarget.onerror = null;
-                  e.currentTarget.src = "/logo.png";
-                }}
-              />
-              {!sidebarCollapsed && (
-                <span className="flex min-w-0 flex-col justify-center">
-                  <span className="text-[0.65rem] leading-tight text-gray-400">ProbeStack</span>
-                  <span className="truncate text-xl font-extrabold leading-tight gradient-text font-heading">
-                    ForgeGateway
-                  </span>
-                </span>
-              )}
-            </button>
-            {!sidebarCollapsed && (
-              <button
-                onClick={() => setSidebarCollapsed(true)}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-[#ff8a5c]/35 hover:bg-[#ff5b1f]/10 hover:text-white"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-            )}
-          </div>
           {!sidebarCollapsed && (
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#ff8a5c]">
@@ -313,14 +305,13 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
               <div className="mt-1 truncate text-sm font-semibold text-white">Control Center</div>
             </div>
           )}
-          {sidebarCollapsed && (
-            <button
-              onClick={() => setSidebarCollapsed(false)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-[#ff8a5c]/35 hover:bg-[#ff5b1f]/10 hover:text-white"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          )}
+          <button
+            onClick={toggleSidebarPin}
+            title={pinned ? 'Unpin sidebar' : 'Pin sidebar'}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-[#ff8a5c]/35 hover:bg-[#ff5b1f]/10 hover:text-white"
+          >
+            {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
         </div>
 
         {/* Navigation Menu */}
@@ -637,7 +628,6 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
 
       {/* ==================== MAIN CONTENT AREA (NESTED ROUTES) ==================== */}
       <div className="min-w-0 flex-1 flex flex-col">
-        {showHeader && <GatewayHeader />}
         <div className="min-h-0 flex-1 overflow-auto">
           <Routes>
             <Route path="dashboard" element={<GatewayDashboard />} />
@@ -692,6 +682,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="*" element={<Navigate to="/gateway/onboarding" replace />} />
           </Routes>
         </div>
+      </div>
       </div>
     </div>
   );

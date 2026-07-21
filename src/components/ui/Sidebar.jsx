@@ -126,12 +126,12 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
   const location  = useLocation();
   const navigate  = useNavigate();
 
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    try { return localStorage.getItem('fs_sidebar_collapsed') !== 'false'; } catch { return true; }
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem('fs_sidebar_pinned') === 'true'; } catch { return false; }
   });
 
-  const [isHovered, setIsHovered] = useState(false);
-  const hoverTimeoutRef = useRef(null);
+  const [hovering, setHovering] = useState(false);
+  const [suppressHover, setSuppressHover] = useState(false);
 
   const [openMenus, setOpenMenus] = useState(() => ({
     'proxy-manager': isProxyPath(location.pathname),
@@ -143,45 +143,30 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
   const sidebarRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('fs_sidebar_collapsed', isCollapsed); } catch {}
-  }, [isCollapsed]);
+    try { localStorage.setItem('fs_sidebar_pinned', pinned); } catch {}
+  }, [pinned]);
 
-  // 🔥 FIX: content moves ONLY on manual toggle (click), NOT on hover
+  // content moves ONLY when pinned, NOT on hover preview
   useEffect(() => {
-    document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+    document.body.classList.toggle('sidebar-collapsed', !pinned);
     return () => { document.body.classList.remove('sidebar-collapsed'); };
-  }, [isCollapsed]);
+  }, [pinned]);
 
-  // 🔥 Only called when mouse leaves the sidebar entirely
-  const handleSidebarMouseLeave = () => {
-    if (hoverTimeoutRef.current) {
-      window.clearTimeout(hoverTimeoutRef.current);
-    }
-    hoverTimeoutRef.current = window.setTimeout(() => {
-      setIsHovered(false);
-    }, 180);
+  const handleMouseEnter = () => setHovering(true);
+  const handleMouseLeave = () => {
+    setHovering(false);
+    setSuppressHover(false);
   };
 
-  // 🔥 Called when mouse enters any icon button
-  const handleIconMouseEnter = () => {
-    if (hoverTimeoutRef.current) {
-      window.clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    setIsHovered(true);
+  const handlePinClick = () => setPinned(true);
+  const handleUnpinClick = () => {
+    setPinned(false);
+    setSuppressHover(true); // collapses immediately even if still hovering
   };
 
-  // 🔥 Called when mouse enters any submenu container (to keep expanded)
-  const handleSubmenuMouseEnter = () => {
-    if (hoverTimeoutRef.current) {
-      window.clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-  };
+  const expanded = pinned || (hovering && !suppressHover);
 
-  const expanded = !isCollapsed || isHovered;
-
-  const toggleCollapse = () => setIsCollapsed((p) => !p);
+  const toggleCollapse = () => (pinned ? handleUnpinClick() : handlePinClick());
 
   const toggleMenu = (id) => setOpenMenus((p) => ({ ...p, [id]: !p[id] }));
 
@@ -302,7 +287,6 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
                         {/* ── primary button ── */}
                         <button
                           onClick={(e) => handleNavClick(item, e)}
-                          onMouseEnter={handleIconMouseEnter} // 🔥 Expand on icon hover
                           className={cn(
                             'group relative flex w-full rounded-xl transition-all duration-150 min-w-0',
                             collapsed
@@ -360,7 +344,6 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
                         {!collapsed && item.hasSubmenu && item.submenuType === 'gateway' && isOpen && (
                           <div
                             className="ml-3 mt-1 space-y-3 border-l border-white/[0.06] pl-3 pb-2"
-                            onMouseEnter={handleSubmenuMouseEnter} // 🔥 Keep expanded when hovering submenu
                           >
                             {gatewayGroups.map((group) => {
                               const GIcon = group.icon;
@@ -421,7 +404,6 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
                         {!collapsed && item.hasSubmenu && item.submenuType === 'list' && isOpen && (
                           <div
                             className="ml-3 mt-0.5 space-y-0.5 border-l border-white/[0.06] pl-3 pb-1"
-                            onMouseEnter={handleSubmenuMouseEnter} // 🔥 Keep expanded when hovering submenu
                           >
                             {item.subItems.map((sub) => {
                               const SubIcon = sub.icon;
@@ -464,7 +446,8 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
     <>
       <aside
         ref={sidebarRef}
-        onMouseLeave={handleSidebarMouseLeave} // 🔥 Only collapse when mouse leaves sidebar
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         className={cn(
           'fixed bottom-0 left-0 top-16 z-40 hidden lg:flex lg:flex-col',
           expanded ? 'w-56' : 'w-16',
@@ -483,7 +466,7 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
         {/* collapse toggle button */}
         <button
           onClick={toggleCollapse}
-          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={pinned ? 'Collapse sidebar' : 'Expand sidebar'}
           className={cn(
             'group absolute -right-3.5 top-8 z-50',
             'flex h-7 w-7 items-center justify-center rounded-full',
@@ -497,7 +480,7 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
             style={{ width: 14, height: 14 }}
             className={cn(
               'text-gray-500 transition-all duration-300 group-hover:text-[#ff8a5c]',
-              !isCollapsed && 'rotate-180',
+              pinned && 'rotate-180',
             )}
           />
         </button>

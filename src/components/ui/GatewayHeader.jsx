@@ -19,7 +19,29 @@ export default function GatewayHeader() {
 
   return (
     <header className="h-16 shrink-0 border-b border-[#1f2840] bg-[#080826] px-4">
-      <div className="flex h-full items-center justify-end gap-4">
+      <div className="flex h-full items-center justify-between gap-4">
+        <button
+          type="button"
+          onClick={() => { window.location.href = "https://forgesphere.probestack.io"; }}
+          className="flex min-w-0 items-center gap-2 text-left transition-opacity hover:opacity-85"
+        >
+          <img
+            src="/assets/justlogo.png"
+            alt="ForgeGateway logo"
+            className="h-9 w-auto flex-shrink-0"
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = "/logo.png";
+            }}
+          />
+          <span className="flex min-w-0 flex-col justify-center">
+            <span className="text-[0.65rem] leading-tight text-gray-400">ProbeStack</span>
+            <span className="truncate text-lg font-extrabold leading-tight gradient-text font-heading">
+              ForgeGateway
+            </span>
+          </span>
+        </button>
+
         <div className="flex items-center gap-2">
           <button
             type="button"

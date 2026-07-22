@@ -21,10 +21,11 @@ import {
 import { complianceService } from "../../services/complianceService";
 import { owaspService } from "../../services/owaspService";
 import { apigeeProxyService } from "../../services/apigeeProxyService";
+import { apigeeLintService } from "../../services/apigeeLintService";
+import { onboardingService } from "../../services/onboardingService";
 import { cn } from "../../lib/utils";
 import ScanResultsView from "./ScanResultsView";
 import HistoryView from "./HistoryView";
-import apigeelintRulesData from "../../data/apigeelintRules.json";
 
 const APIGEE = "APIGEE";
 
@@ -115,6 +116,22 @@ const currentUserEmail = () =>
 // through the Add Custom Rule flow go through REQUESTED → "READY" (or REJECTED).
 const isRuleReady = (rule) =>
   !!rule?.enabled && (rule.status === "READY" || rule.status === "ACTIVE");
+
+// Normalises a /lint/v1/rules entry ({ ruleId, name, description, severity: 1|2,
+// nodeType, enabled, source, file }) into the shape RuleCard/isRuleReady expect
+// ({ ruleId, ruleName, ruleDescription, severity: MANDATORY|RECOMMENDED, status }).
+// This API has no separate approval workflow — enabled rules are immediately
+// runnable, so status is derived straight from `enabled`.
+const mapLintApiRule = (r) => ({
+  ruleId: r.ruleId,
+  ruleName: r.name,
+  ruleDescription: r.description || "",
+  severity: r.severity === 2 ? "MANDATORY" : "RECOMMENDED",
+  enabled: r.enabled,
+  status: r.enabled ? "ACTIVE" : "INACTIVE",
+  nodeType: r.nodeType,
+  source: r.source,
+});
 
 // ----------------------------------------------------------------------
 // Governance dashboard scoring
@@ -764,8 +781,7 @@ const FamilyBody = ({ family, selectedProxy, selectedOrg, onShowDetail, external
 
 // Flattens apigeelint's own per-file report (one entry per XML file, each with
 // a `messages` array) into a single list of rows for the table below. This is
-// the exact shape the real apigeelint engine returns (same as `-f json.js`) —
-// see /apigee-wrapper/organizations/{org}/apis/{api}/lint on the backend.
+// the exact shape /lint/v1/validate/url returns under `report`.
 const flattenApigeelintReport = (report) =>
   (report || []).flatMap((fileResult) =>
     (fileResult.messages || []).map((m) => ({
@@ -780,7 +796,7 @@ const flattenApigeelintReport = (report) =>
 const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToken, onRunningChange }) => {
   const [phase, setPhase] = useState("idle"); // idle | running | done | error
   const [results, setResults] = useState(null);
-  const [summary, setSummary] = useState(null); // { fileCount, errorCount, warningCount, revision }
+  const [summary, setSummary] = useState(null); // { fileCount, errorCount, warningCount, score, grade }
   const [error, setError] = useState("");
 
   const showMessageRef = useRef(showMessage);
@@ -808,16 +824,69 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
       setError("");
       setResults(null);
       setSummary(null);
-      const res = await apigeeProxyService.lintProxyBundle(selectedOrg, selectedProxy);
+
+      // This tab works off live Apigee org+proxy selection, which has no
+      // onboarding record of its own — so first check whether the selected
+      // proxy was created by the Lifecycle Tool (proxy.lifecycle.microserviceId)
+      // and, if so, fetch that onboarding resource's generated code artifact.
+      // The scan runs against that generated bundle, not the live deployed
+      // Apigee revision.
+      const detailsRes = await apigeeProxyService.getProxyDetails(selectedOrg);
+      if (cancelled) return;
+      if (!detailsRes.success) {
+        setError(detailsRes.error || "Failed to load proxy details");
+        showMessageRef.current?.(detailsRes.error || "Failed to load proxy details", "error");
+        setPhase("error");
+        onRunningChange?.(false);
+        return;
+      }
+      const proxyObj = (detailsRes.data || []).find((p) => p.name === selectedProxy);
+      if (!proxyObj || proxyObj.source !== "LIFECYCLE_TOOL" || !proxyObj.lifecycle?.microserviceId) {
+        const msg = "This proxy isn't linked to a Lifecycle Tool onboarding record, so no generated code artifact is available to lint. Pick a proxy that was created via the Lifecycle Tool.";
+        setError(msg);
+        showMessageRef.current?.(msg, "error");
+        setPhase("error");
+        onRunningChange?.(false);
+        return;
+      }
+      const resourceRes = await onboardingService.getResourceDetails(proxyObj.lifecycle.microserviceId);
+      if (cancelled) return;
+      if (!resourceRes.success) {
+        setError(resourceRes.error || "Failed to load onboarding resource");
+        showMessageRef.current?.(resourceRes.error || "Failed to load onboarding resource", "error");
+        setPhase("error");
+        onRunningChange?.(false);
+        return;
+      }
+      const payload = resourceRes.data?.data || resourceRes.data || {};
+      const resourceDetails = payload.resource || payload || {};
+      const codeGenResults = resourceDetails.codeGenResults || payload.codeGenResults || [];
+      const codeGen = codeGenResults.find((r) => r?.status === "SUCCESS") || codeGenResults[0];
+      const downloadUrl = codeGen?.archiveDownloadUrl;
+      if (!downloadUrl) {
+        const msg = "No generated code artifact found for this proxy. Make sure code generation has completed.";
+        setError(msg);
+        showMessageRef.current?.(msg, "error");
+        setPhase("error");
+        onRunningChange?.(false);
+        return;
+      }
+      const res = await apigeeLintService.validateUrl({ downloadUrl, profile: "apigeex", useCustomRules: true });
       if (cancelled) return;
       if (res.success) {
-        const { report, fileCount, errorCount, warningCount, revision } = res.data;
+        const { report, summary: apiSummary } = res.data || {};
         setResults(flattenApigeelintReport(report));
-        setSummary({ fileCount, errorCount, warningCount, revision });
+        setSummary({
+          fileCount: (report || []).length,
+          errorCount: apiSummary?.errorCount ?? 0,
+          warningCount: apiSummary?.warningCount ?? 0,
+          score: apiSummary?.score,
+          grade: apiSummary?.grade,
+        });
         setPhase("done");
       } else {
-        setError(res.error || "Failed to lint proxy bundle");
-        showMessageRef.current?.(res.error || "Failed to lint proxy bundle", "error");
+        setError(res.error || "Failed to run Apigee lint scan");
+        showMessageRef.current?.(res.error || "Failed to run Apigee lint scan", "error");
         setPhase("error");
       }
       onRunningChange?.(false);
@@ -854,9 +923,9 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
     return null;
   }
 
-  const score = summary.errorCount === 0 && summary.warningCount === 0
+  const score = summary.score ?? (summary.errorCount === 0 && summary.warningCount === 0
     ? 100
-    : Math.max(0, 100 - summary.errorCount * 8 - summary.warningCount * 4);
+    : Math.max(0, 100 - summary.errorCount * 8 - summary.warningCount * 4));
 
   return (
     <div data-testid="linting-body">
@@ -869,7 +938,7 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
               <span className="text-sm text-gray-500">/ 100</span>
             </div>
             <span className="text-[11px] text-slate-500">
-              {summary.fileCount} XML files scanned{summary.revision ? ` · revision ${summary.revision}` : ""}
+              {summary.fileCount} XML files scanned{summary.grade ? ` · grade ${summary.grade}` : ""}
             </span>
           </div>
         </div>
@@ -923,12 +992,6 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
 };
 
 /* ─────────────────────────── Linting rule catalog (Standard/Custom) */
-
-// Standard Rules shown on the Apigee Linting tab — generated directly from the
-// installed `apigeelint` package's plugin metadata (ruleId/name/description/
-// severity read off each plugin file), not hand-transcribed from the README.
-// Regenerate with: node scripts/generate-apigeelint-rules.mjs
-const standardRules = apigeelintRulesData.rules;
 
 const PAGE_SIZE = 6;
 
@@ -1238,8 +1301,10 @@ const GovernanceWorkspace = ({ showMessage }) => {
   // download + lint of the selected proxy.
   const [lintRunToken, setLintRunToken] = useState(0);
 
-  // Standard/Custom rule catalog shown on the linting tab.
+  // Standard/Custom rule catalog shown on the linting tab — both sourced live
+  // from GET /lint/v1/rules (internalRules → Standard, customRules → Custom).
   const [lintingRules, setLintingRules] = useState([]);
+  const [apigeeInternalRules, setApigeeInternalRules] = useState([]);
   const [selectedLintingRules, setSelectedLintingRules] = useState(() => new Set());
   const [standardInitialized, setStandardInitialized] = useState(false);
   const [loadingLintingRules, setLoadingLintingRules] = useState(false);
@@ -1258,12 +1323,13 @@ const GovernanceWorkspace = ({ showMessage }) => {
     setLoadingLintingRules(true);
     setLintingRulesError("");
     try {
-      const res = await complianceService.getLintingRules({ assetType: APIGEE, status: "all" });
+      const res = await apigeeLintService.getRules();
       if (!res.success) throw new Error(res.error);
-      const list = res.data?.rules || [];
-      setLintingRules(list);
+      const customList = (res.data?.customRules || []).map(mapLintApiRule);
+      setLintingRules(customList);
+      setApigeeInternalRules((res.data?.internalRules || []).map(mapLintApiRule));
       setCustomPage(0);
-      const readyIds = list.filter(isRuleReady).map((r) => r.ruleId);
+      const readyIds = customList.filter(isRuleReady).map((r) => r.ruleId);
       setSelectedLintingRules((prev) => new Set([...prev, ...readyIds]));
     } catch (err) {
       setLintingRulesError(err.message);
@@ -1279,11 +1345,11 @@ const GovernanceWorkspace = ({ showMessage }) => {
   }, [isLintingTab, refreshKey]);
 
   useEffect(() => {
-    if (!standardInitialized && standardRules.length > 0) {
-      setSelectedLintingRules((prev) => new Set([...prev, ...standardRules.map((r) => r.ruleId)]));
+    if (!standardInitialized && apigeeInternalRules.length > 0) {
+      setSelectedLintingRules((prev) => new Set([...prev, ...apigeeInternalRules.map((r) => r.ruleId)]));
       setStandardInitialized(true);
     }
-  }, [standardInitialized]);
+  }, [apigeeInternalRules, standardInitialized]);
 
   const toggleLintingRule = (id) => {
     setSelectedLintingRules((prev) => {
@@ -1293,8 +1359,8 @@ const GovernanceWorkspace = ({ showMessage }) => {
     });
   };
 
-  const standardVisible = useMemo(() => standardRules.slice(0, standardVisibleCount), [standardVisibleCount]);
-  const standardHasMore = standardVisibleCount < standardRules.length;
+  const standardVisible = useMemo(() => apigeeInternalRules.slice(0, standardVisibleCount), [apigeeInternalRules, standardVisibleCount]);
+  const standardHasMore = standardVisibleCount < apigeeInternalRules.length;
   const customPaginated = useMemo(
     () => lintingRules.slice(customPage * PAGE_SIZE, customPage * PAGE_SIZE + PAGE_SIZE),
     [lintingRules, customPage]
@@ -1486,7 +1552,7 @@ const GovernanceWorkspace = ({ showMessage }) => {
                 ruleTab={lintingRuleTab}
                 standardVisible={standardVisible}
                 standardHasMore={standardHasMore}
-                onLoadMoreStandard={() => setStandardVisibleCount((n) => Math.min(n + 3, standardRules.length))}
+                onLoadMoreStandard={() => setStandardVisibleCount((n) => Math.min(n + 3, apigeeInternalRules.length))}
                 loadingLintingRules={loadingLintingRules}
                 lintingRulesError={lintingRulesError}
                 lintingRules={lintingRules}

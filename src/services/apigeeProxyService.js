@@ -74,6 +74,21 @@ export const apigeeProxyService = {
     }
   },
 
+  /** Fetch detailed proxy metadata for one org — includes, per proxy, whether
+   *  it was created by the Lifecycle Tool and, if so, the onboarding
+   *  microserviceId it's linked to (proxy.source === 'LIFECYCLE_TOOL' &&
+   *  proxy.lifecycle.microserviceId). Used to find the generated code
+   *  artifact for a live proxy when it has no onboarding record of its own. */
+  getProxyDetails: async (org) => {
+    if (!org) return { success: false, error: 'org is required' };
+    try {
+      const data = await authedFetch(`${APIGEE_BASE}/organizations/${encodeURIComponent(org)}/apis/details`);
+      return { success: true, data: data?.proxies || [] };
+    } catch (err) {
+      return { success: false, error: err.message || 'Failed to fetch proxy details' };
+    }
+  },
+
   /** Run the real apigeelint bundle linter (server-side) against one proxy
    *  revision. Backend contract: POST {APIGEE_BASE}/organizations/{org}/apis/{api}/lint
    *  → { org, api, revision, profile, fileCount, errorCount, warningCount, report }

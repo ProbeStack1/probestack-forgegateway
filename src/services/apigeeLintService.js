@@ -1,0 +1,54 @@
+import axios from 'axios';
+
+// Resolved at build time from Vite env. Defaults to the deployed service.
+// Override locally in .env: VITE_APIGEE_LINT_BASE_URL=http://localhost:8080/lint/v1
+export const APIGEE_LINT_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_APIGEE_LINT_BASE_URL) ||
+  'https://forgesphere.probestack.io/lint/v1';
+
+const lintClient = axios.create({
+  baseURL: APIGEE_LINT_BASE_URL,
+  timeout: 90000, // downloading + extracting + linting a bundle can take a while
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+const unwrapError = (error, fallback) => (
+  error.response?.data?.message ||
+  error.response?.data?.error ||
+  error.message ||
+  fallback
+);
+
+export const apigeeLintService = {
+  // GET /lint/v1/rules → { internalRules, customRules, externalRules }
+  getRules: async () => {
+    try {
+      const response = await lintClient.get('/rules');
+      return { success: true, data: response.data };
+    } catch (error) {
+      return {
+        success: false,
+        error: unwrapError(error, 'Failed to load Apigee lint rules'),
+      };
+    }
+  },
+
+  // POST /lint/v1/validate/url → runs apigeelint against a downloadable bundle archive.
+  validateUrl: async ({ downloadUrl, profile = 'apigeex', useCustomRules = true }) => {
+    try {
+      const response = await lintClient.post('/validate/url', {
+        downloadUrl,
+        profile,
+        useCustomRules,
+      });
+      return { success: true, data: response.data };
+    } catch (error) {
+      return {
+        success: false,
+        error: unwrapError(error, 'Failed to run Apigee lint scan'),
+      };
+    }
+  },
+};

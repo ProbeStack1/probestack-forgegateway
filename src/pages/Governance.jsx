@@ -30,12 +30,12 @@ import { complianceService } from "../services/complianceService";
 import { owaspService } from "../services/owaspService";
 import { onboardingService } from "../services/onboardingService";
 import { apigeeProxyService } from "../services/apigeeProxyService";
+import { apigeeLintService } from "../services/apigeeLintService";
 import { apiDesignService } from "../services/apiDesignService";
 import { specScoreService } from "../services/specScoreService";
 import { Card } from "../components/ui/card";
 import { cn } from "../lib/utils";
 import API_BASE_URL from "../config/apiConfig";
-import apigeelintRulesData from "../data/apigeelintRules.json";
 
 // ----------------------------------------------------------------------
 // helpers & constants
@@ -120,6 +120,22 @@ const parseRuleMessage = (raw) => {
 // through the Add Custom Rule flow go through REQUESTED → "READY" (or REJECTED).
 const isRuleReady = (rule) =>
   !!rule?.enabled && (rule.status === "READY" || rule.status === "ACTIVE");
+
+// Normalises a /lint/v1/rules entry ({ ruleId, name, description, severity: 1|2,
+// nodeType, enabled, source, file }) into the shape RuleCard/isRuleReady expect
+// ({ ruleId, ruleName, ruleDescription, severity: MANDATORY|RECOMMENDED, status }).
+// This API has no separate approval workflow — enabled rules are immediately
+// runnable, so status is derived straight from `enabled`.
+const mapLintApiRule = (r) => ({
+  ruleId: r.ruleId,
+  ruleName: r.name,
+  ruleDescription: r.description || "",
+  severity: r.severity === 2 ? "MANDATORY" : "RECOMMENDED",
+  enabled: r.enabled,
+  status: r.enabled ? "ACTIVE" : "INACTIVE",
+  nodeType: r.nodeType,
+  source: r.source,
+});
 
 const formatDate = (iso) => {
   if (!iso) return "—";
@@ -1772,11 +1788,12 @@ const LintingBody = ({ assetType, selectedResource, resourceObject, showMessage,
 };
 
 // ----------------------------------------------------------------------
-// Apigee Linting tab — downloads the deployed apiproxy bundle (XML) for the
-// selected proxy and runs a set of Apigee best-practice checks against the
-// ProxyEndpoint / TargetEndpoint / Policy XML files. Nothing is fetched
-// until the user clicks "Run scan" — bundle download + unzip is comparatively
-// heavy compared to the OpenAPI-spec-based "API Linting" tab.
+// Apigee Linting tab — sends the generated apiproxy bundle's download URL
+// (from the resource's onboarding codeGenResults, same archive the Microservice
+// tab downloads) to POST /lint/v1/validate/url, which runs apigeelint server-side
+// against the ProxyEndpoint / TargetEndpoint / Policy XML files. Nothing is
+// fetched until the user clicks "Run scan" — download + unzip + lint is
+// comparatively heavy compared to the OpenAPI-spec-based "API Linting" tab.
 // ----------------------------------------------------------------------
 // Severity keys returned by the real apigeelint engine (ESLint convention:
 // 1 = warning, 2 = error).
@@ -1787,8 +1804,7 @@ const APIGEE_LINT_SEVERITY = {
 
 // Flattens apigeelint's own per-file report (one entry per XML file, each with
 // a `messages` array) into a single list of rows for the table below. This is
-// the exact shape the real apigeelint engine returns (same as `-f json.js`) —
-// see /apigee-wrapper/organizations/{org}/apis/{api}/lint on the backend.
+// the exact shape /lint/v1/validate/url returns under `report`.
 const flattenApigeelintReport = (report) =>
   (report || []).flatMap((fileResult) =>
     (fileResult.messages || []).map((m) => ({
@@ -1800,16 +1816,10 @@ const flattenApigeelintReport = (report) =>
     }))
   );
 
-// Standard Rules shown on the Apigee Linting tab — generated directly from the
-// installed `apigeelint` package's plugin metadata (ruleId/name/description/
-// severity read off each plugin file), not hand-transcribed from the README.
-// Regenerate with: node scripts/generate-apigeelint-rules.mjs
-const apigeeLintStandardRules = apigeelintRulesData.rules;
-
 const ApigeeBundleLintBody = ({ selectedResource, resourceObject, runToken, onRunningChange, showMessage }) => {
   const [phase, setPhase] = useState("idle"); // idle | running | done | error
   const [results, setResults] = useState(null);
-  const [summary, setSummary] = useState(null); // { fileCount, errorCount, warningCount, revision }
+  const [summary, setSummary] = useState(null); // { fileCount, errorCount, warningCount, score, grade }
   const [error, setError] = useState("");
   // Guards against a mount-time auto-run: if this body unmounts (tab switch) and
   // remounts, `runToken` arrives already non-zero from a prior click — only an
@@ -1834,18 +1844,35 @@ const ApigeeBundleLintBody = ({ selectedResource, resourceObject, runToken, onRu
       setError("");
       setResults(null);
       setSummary(null);
-      const orgName = resourceObject?.raw?.orgName || "gen-ai-poc-onboarding";
-      const proxyName = resourceObject?.raw?.name || selectedResource;
-      const res = await apigeeProxyService.lintProxyBundle(orgName, proxyName);
+      // The scan runs against the generated code artifact (same archive the
+      // Microservice tab downloads), not the live deployed Apigee revision —
+      // so the resource must have a completed codegen run.
+      const codeGenResults = resourceObject?.raw?.codeGenResults || [];
+      const codeGen = codeGenResults.find((r) => r?.status === "SUCCESS") || codeGenResults[0];
+      const downloadUrl = codeGen?.archiveDownloadUrl;
+      if (!downloadUrl) {
+        setError("No generated code artifact found for this proxy. Make sure code generation has completed.");
+        showMessage?.("No generated code artifact found for this proxy.", "error");
+        setPhase("error");
+        onRunningChange?.(false);
+        return;
+      }
+      const res = await apigeeLintService.validateUrl({ downloadUrl, profile: "apigeex", useCustomRules: true });
       if (cancelled) return;
       if (res.success) {
-        const { report, fileCount, errorCount, warningCount, revision } = res.data;
+        const { report, summary: apiSummary } = res.data || {};
         setResults(flattenApigeelintReport(report));
-        setSummary({ fileCount, errorCount, warningCount, revision });
+        setSummary({
+          fileCount: (report || []).length,
+          errorCount: apiSummary?.errorCount ?? 0,
+          warningCount: apiSummary?.warningCount ?? 0,
+          score: apiSummary?.score,
+          grade: apiSummary?.grade,
+        });
         setPhase("done");
       } else {
-        setError(res.error || "Failed to lint proxy bundle");
-        showMessage?.(res.error || "Failed to lint proxy bundle", "error");
+        setError(res.error || "Failed to run Apigee lint scan");
+        showMessage?.(res.error || "Failed to run Apigee lint scan", "error");
         setPhase("error");
       }
       onRunningChange?.(false);
@@ -1878,9 +1905,9 @@ const ApigeeBundleLintBody = ({ selectedResource, resourceObject, runToken, onRu
     return null;
   }
 
-  const score = summary.errorCount === 0 && summary.warningCount === 0
+  const score = summary.score ?? (summary.errorCount === 0 && summary.warningCount === 0
     ? 100
-    : Math.max(0, 100 - summary.errorCount * 8 - summary.warningCount * 4);
+    : Math.max(0, 100 - summary.errorCount * 8 - summary.warningCount * 4));
   const scoreColor = score >= 80 ? "text-green-400" : score >= 60 ? "text-yellow-400" : "text-red-400";
 
   return (
@@ -1894,7 +1921,7 @@ const ApigeeBundleLintBody = ({ selectedResource, resourceObject, runToken, onRu
               <span className="text-sm text-gray-500">/ 100</span>
             </div>
             <span className="text-[11px] text-slate-500">
-              {summary.fileCount} XML files scanned{summary.revision ? ` · revision ${summary.revision}` : ""}
+              {summary.fileCount} XML files scanned{summary.grade ? ` · grade ${summary.grade}` : ""}
             </span>
           </div>
         </div>
@@ -2699,12 +2726,18 @@ const Governance = ({ showHeader = true }) => {
   // --------------------------------------------------------------------
   // fetch resources based on assetType (and selectedApigeeOrg for Apigee)
   // --------------------------------------------------------------------
+  // Apigee Linting sources resources differently from the other tabs (see below) —
+  // derived as a boolean so switching between e.g. Compliance/OWASP/API Linting
+  // (which share the same live-org-proxy source) doesn't needlessly refetch and
+  // reset the selection; only actually crossing into/out of Apigee Linting does.
+  const apigeeLintTabActive = assetType === "APIGEE_PROXY" && activeTab === "apigeeLinting";
+
   const fetchResources = useCallback(async () => {
     setLoadingResources(true);
     setResourceError("");
     setSelectedResource("");
     try {
-      if (assetType === "APIGEE_PROXY") {
+      if (assetType === "APIGEE_PROXY" && !apigeeLintTabActive) {
         if (!selectedApigeeOrg) {
           setResources([]);
           return;
@@ -2718,15 +2751,19 @@ const Governance = ({ showHeader = true }) => {
           raw: { name, orgName: selectedApigeeOrg },
         })));
       } else {
-        // MICROSERVICE or KONG
+        // MICROSERVICE, KONG, or APIGEE_PROXY-on-the-Apigee-Linting-tab — all three
+        // are ForgeSphere onboarding records, sourced the same way. Apigee Linting
+        // needs the onboarding record (not the live Apigee org proxy list) because
+        // the lint scan runs against the generated code artifact's download URL,
+        // which only lives on the onboarding record's codeGenResults.
         const result = await onboardingService.getAllByProjectType(assetType);
         if (!result.success) throw new Error(result.error || "Failed to load resources");
         const items = result.data?.data || result.data || [];
         const mapped = items.map((item, idx) => {
-          const micro = item?.microservice || {};
+          const micro = item?.microservice || item?.apigeeProxy || {};
           const kong = item?.kong || item?.kongService || {};
-          // For MICROSERVICE the real id + name live inside `item.microservice`.
-          // For KONG the analogous container is `item.kong` (when present).
+          // For MICROSERVICE/APIGEE_PROXY the real id + name live inside
+          // `item.microservice`. For KONG the analogous container is `item.kong`.
           const id = micro?.id || kong?.id || item?.id || `resource-${idx + 1}`;
           const name = micro?.applicationName || micro?.apiName
             || kong?.serviceName || kong?.applicationName
@@ -2744,7 +2781,7 @@ const Governance = ({ showHeader = true }) => {
     } finally {
       setLoadingResources(false);
     }
-  }, [assetType, selectedApigeeOrg]);
+  }, [assetType, apigeeLintTabActive, selectedApigeeOrg]);
 
   useEffect(() => {
     fetchResources();
@@ -2786,11 +2823,14 @@ const Governance = ({ showHeader = true }) => {
   // Apigee Linting tabs. Only fetched once one of those tabs is active.
   // --------------------------------------------------------------------
   const [lintingRules, setLintingRules] = useState([]);
+  // Standard Rule catalog for the Apigee Linting tab — from GET /lint/v1/rules'
+  // internalRules, fetched alongside customRules in fetchLintingRules below.
+  const [apigeeInternalRules, setApigeeInternalRules] = useState([]);
   const [selectedLintingRules, setSelectedLintingRules] = useState(new Set());
   const [apiLintStandardInitialized, setApiLintStandardInitialized] = useState(false);
   const [apigeeLintStandardInitialized, setApigeeLintStandardInitialized] = useState(false);
   const [loadingLintingRules, setLoadingLintingRules] = useState(false);
-  
+
   const [lintingRulesError, setLintingRulesError] = useState("");
   const [standardVisibleCount, setStandardVisibleCount] = useState(6);
   const [customPage, setCustomPage] = useState(0);
@@ -2804,6 +2844,19 @@ const Governance = ({ showHeader = true }) => {
     setLoadingLintingRules(true);
     setLintingRulesError("");
     try {
+      if (activeTab === "apigeeLinting") {
+        // Apigee Linting sources both rule catalogs live from the lint service
+        // itself rather than the compliance-api linting-rules endpoint.
+        const res = await apigeeLintService.getRules();
+        if (!res.success) throw new Error(res.error);
+        const customList = (res.data?.customRules || []).map(mapLintApiRule);
+        setLintingRules(customList);
+        setApigeeInternalRules((res.data?.internalRules || []).map(mapLintApiRule));
+        setCustomPage(0);
+        const customReadyIds = customList.filter(isRuleReady).map(r => r.ruleId);
+        setSelectedLintingRules(prev => new Set([...prev, ...customReadyIds]));
+        return;
+      }
       let backendAssetType = assetType;
       if (assetType === "APIGEE_PROXY") backendAssetType = "APIGEE";
       const res = await complianceService.getLintingRules({ assetType: backendAssetType, status: "all" });
@@ -2820,7 +2873,7 @@ setSelectedLintingRules(prev => new Set([...prev, ...customReadyIds]));
     } finally {
       setLoadingLintingRules(false);
     }
-  }, [assetType]);
+  }, [assetType, activeTab]);
 
   // Toggle function for Linting rules (both Standard and Custom)
 const toggleLintingRule = (id) => {
@@ -2931,9 +2984,9 @@ const apiLintStandardRules = useMemo(() => [
 ], []);
 
   // Standard rule catalog for whichever linting tab is active — API Linting shows
-  // the OpenAPI/Spectral-style rules, Apigee Linting shows the apigeelint README
-  // rule catalog (BN*/PD*/TD*/etc).
-  const activeStandardRules = activeTab === "apigeeLinting" ? apigeeLintStandardRules : apiLintStandardRules;
+  // the OpenAPI/Spectral-style rules, Apigee Linting shows the live internalRules
+  // catalog from GET /lint/v1/rules.
+  const activeStandardRules = activeTab === "apigeeLinting" ? apigeeInternalRules : apiLintStandardRules;
 
   // Initialize both standard rule sets as checked by default (once each, regardless
   // of which tab is currently active — mirrors how custom rules are merged in above).
@@ -2945,11 +2998,11 @@ const apiLintStandardRules = useMemo(() => [
   }, [apiLintStandardRules, apiLintStandardInitialized]);
 
   useEffect(() => {
-    if (!apigeeLintStandardInitialized && apigeeLintStandardRules.length > 0) {
-      setSelectedLintingRules(prev => new Set([...prev, ...apigeeLintStandardRules.map(r => r.ruleId)]));
+    if (!apigeeLintStandardInitialized && apigeeInternalRules.length > 0) {
+      setSelectedLintingRules(prev => new Set([...prev, ...apigeeInternalRules.map(r => r.ruleId)]));
       setApigeeLintStandardInitialized(true);
     }
-  }, [apigeeLintStandardInitialized]);
+  }, [apigeeInternalRules, apigeeLintStandardInitialized]);
 
   // Reset "Load More" pagination when switching between the two very
   // differently-sized standard rule catalogs.
@@ -3167,8 +3220,10 @@ const customHasMore = useMemo(() => {
             </div>
             <div className="w-px h-8 bg-dark-700" />
 
-            {/* Apigee org dropdown — visible only when APIGEE_PROXY is the asset type */}
-            {assetType === "APIGEE_PROXY" && (
+            {/* Apigee org dropdown — visible only when APIGEE_PROXY is the asset type and
+                we're not on Apigee Linting (which sources resources from onboarding records
+                instead of live org proxies, so org selection doesn't apply). */}
+            {assetType === "APIGEE_PROXY" && !apigeeLintTabActive && (
               <div className="relative min-w-[220px]">
                 <select
                   value={selectedApigeeOrg}
@@ -3239,11 +3294,6 @@ const customHasMore = useMemo(() => {
             >
               <LayoutDashboard className="h-4 w-4" /> Dashboard
             </button>
-            {activeTab === "apigeeLinting" && (
-              <span className="flex items-center gap-1.5 text-xs text-amber-300/90">
-                <AlertCircle className="h-3.5 w-3.5" /> These rules can only be executed as part of the CI/CD Pipeline
-              </span>
-            )}
           </div>
 
           {/* Tabs */}

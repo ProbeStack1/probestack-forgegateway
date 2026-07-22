@@ -51,7 +51,9 @@ export const GatewayContextSelector = ({
             const result = await response.json();
             if (result.status === 'SUCCESS' && result.data?.gatewayOrganizations) {
                 const orgs = result.data.gatewayOrganizations;
-                const orgNames = orgs.map(o => o.name);
+                const orgNames = orgs
+                    .map(o => o.name)
+                    .sort((a, b) => (b?.toLowerCase() === 'forgesphere') - (a?.toLowerCase() === 'forgesphere'));
                 const map = {};
                 orgs.forEach(o => { map[o.name] = o.id; });
                 setOrganizations(orgNames);

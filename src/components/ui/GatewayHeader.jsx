@@ -37,7 +37,7 @@ export default function GatewayHeader() {
           <span className="flex min-w-0 flex-col justify-center">
             <span className="text-[0.65rem] leading-tight text-gray-400">ProbeStack</span>
             <span className="truncate text-lg font-extrabold leading-tight gradient-text font-heading">
-              ForgeGateway
+              ForgeSphere API Gateway
             </span>
           </span>
         </button>

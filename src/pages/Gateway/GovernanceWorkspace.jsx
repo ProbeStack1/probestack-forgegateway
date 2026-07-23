@@ -793,6 +793,51 @@ const flattenApigeelintReport = (report) =>
     }))
   );
 
+// Builds the summary panel state from a /lint/v1/validate(/url) response —
+// pulls both the per-run `summary` block and the top-level bundleType/customRulesRun.
+const buildLintSummary = (data) => {
+  const { report, summary: apiSummary, bundleType, customRulesRun } = data || {};
+  return {
+    fileCount: (report || []).length,
+    errorCount: apiSummary?.errorCount ?? 0,
+    warningCount: apiSummary?.warningCount ?? 0,
+    totalMessages: apiSummary?.totalMessages ?? ((apiSummary?.errorCount ?? 0) + (apiSummary?.warningCount ?? 0)),
+    score: apiSummary?.score,
+    grade: apiSummary?.grade,
+    ruleBreakdown: apiSummary?.ruleBreakdown || [],
+    bundleType: bundleType || "",
+    customRulesRun: customRulesRun || [],
+  };
+};
+
+// One-off special case: this specific proxy's bundle is fetched straight from the
+// Apigee Management API (not via a Lifecycle Tool onboarding artifact) and posted
+// to /lint/v1/validate as a multipart upload rather than /lint/v1/validate/url.
+// Every other proxy keeps using the Lifecycle Tool + validateUrl flow below.
+const SPECIAL_LINT_PROXY = "apigee-migration-tailor-api-v2";
+const SPECIAL_LINT_ORG = "gen-ai-poc-onboarding";
+const SPECIAL_LINT_TOKEN_URL = "https://token-service-113875395623.us-central1.run.app/token";
+
+const runSpecialProxyBundleLint = async () => {
+  const tokenRes = await fetch(SPECIAL_LINT_TOKEN_URL);
+  if (!tokenRes.ok) throw new Error(`Token service error: ${tokenRes.status}`);
+  const tokenBody = await tokenRes.json();
+  const accessToken = tokenBody.access_token || tokenBody.token;
+  if (!accessToken) throw new Error("Token service returned no access_token field.");
+
+  const bundleUrl = `https://apigee.googleapis.com/v1/organizations/${SPECIAL_LINT_ORG}/apis/${SPECIAL_LINT_PROXY}/revisions/1?format=bundle`;
+  const bundleRes = await fetch(bundleUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!bundleRes.ok) throw new Error(`Failed to download proxy bundle: HTTP ${bundleRes.status}`);
+  const bundleBlob = await bundleRes.blob();
+
+  return apigeeLintService.validateBundle({
+    file: bundleBlob,
+    fileName: `${SPECIAL_LINT_PROXY}.zip`,
+    profile: "apigeex",
+    useCustomRules: true,
+  });
+};
+
 const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToken, onRunningChange }) => {
   const [phase, setPhase] = useState("idle"); // idle | running | done | error
   const [results, setResults] = useState(null);
@@ -824,6 +869,29 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
       setError("");
       setResults(null);
       setSummary(null);
+
+      if (selectedProxy === SPECIAL_LINT_PROXY) {
+        try {
+          const res = await runSpecialProxyBundleLint();
+          if (cancelled) return;
+          if (res.success) {
+            setResults(flattenApigeelintReport(res.data?.report));
+            setSummary(buildLintSummary(res.data));
+            setPhase("done");
+          } else {
+            setError(res.error || "Failed to run Apigee lint scan");
+            showMessageRef.current?.(res.error || "Failed to run Apigee lint scan", "error");
+            setPhase("error");
+          }
+        } catch (err) {
+          if (cancelled) return;
+          setError(err.message || "Failed to run Apigee lint scan");
+          showMessageRef.current?.(err.message || "Failed to run Apigee lint scan", "error");
+          setPhase("error");
+        }
+        onRunningChange?.(false);
+        return;
+      }
 
       // This tab works off live Apigee org+proxy selection, which has no
       // onboarding record of its own — so first check whether the selected
@@ -874,15 +942,8 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
       const res = await apigeeLintService.validateUrl({ downloadUrl, profile: "apigeex", useCustomRules: true });
       if (cancelled) return;
       if (res.success) {
-        const { report, summary: apiSummary } = res.data || {};
-        setResults(flattenApigeelintReport(report));
-        setSummary({
-          fileCount: (report || []).length,
-          errorCount: apiSummary?.errorCount ?? 0,
-          warningCount: apiSummary?.warningCount ?? 0,
-          score: apiSummary?.score,
-          grade: apiSummary?.grade,
-        });
+        setResults(flattenApigeelintReport(res.data?.report));
+        setSummary(buildLintSummary(res.data));
         setPhase("done");
       } else {
         setError(res.error || "Failed to run Apigee lint scan");
@@ -948,6 +1009,30 @@ const ApigeeBundleLintBody = ({ selectedOrg, selectedProxy, showMessage, runToke
             style={{ width: `${score}%` }}
           />
         </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 rounded-lg border border-[#24304d] bg-[#0f172a]/60 text-xs">
+          <span className="text-rose-300">{summary.errorCount} error{summary.errorCount === 1 ? "" : "s"}</span>
+          <span className="text-amber-300">{summary.warningCount} warning{summary.warningCount === 1 ? "" : "s"}</span>
+          <span className="text-slate-400">{summary.totalMessages} total issue{summary.totalMessages === 1 ? "" : "s"}</span>
+          {summary.bundleType && <span className="text-slate-400">Bundle type: <span className="text-slate-300">{summary.bundleType}</span></span>}
+          {summary.customRulesRun.length > 0 && (
+            <span className="text-slate-400">
+              Custom rules run: <span className="text-slate-300">{summary.customRulesRun.join(", ")}</span>
+            </span>
+          )}
+        </div>
+        {summary.ruleBreakdown.length > 0 && (
+          <div className="flex flex-wrap gap-2" data-testid="lint-rule-breakdown">
+            {summary.ruleBreakdown.map((rb) => (
+              <span
+                key={rb.ruleId}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium ${APIGEE_LINT_SEVERITY[rb.severity]?.pillBg} ${APIGEE_LINT_SEVERITY[rb.severity]?.text}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${APIGEE_LINT_SEVERITY[rb.severity]?.dot}`} />
+                {rb.ruleId} × {rb.count}
+              </span>
+            ))}
+          </div>
+        )}
         {results.length === 0 ? (
           <div className="flex items-center gap-2 p-4 rounded-lg border border-green-500/30 bg-green-500/10">
             <CheckCircle2 className="w-4 h-4 text-green-400 shrink-0" />

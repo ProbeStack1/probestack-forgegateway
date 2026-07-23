@@ -51,4 +51,24 @@ export const apigeeLintService = {
       };
     }
   },
+
+  // POST /lint/v1/validate → runs apigeelint against an uploaded bundle archive
+  // (multipart/form-data). Used when the bundle is already in hand as a Blob
+  // rather than reachable via a downloadUrl. Note: plain axios (not lintClient)
+  // so the JSON content-type default doesn't clobber the multipart boundary.
+  validateBundle: async ({ file, fileName = 'bundle.zip', profile = 'apigeex', useCustomRules = true }) => {
+    try {
+      const form = new FormData();
+      form.append('profile', profile);
+      form.append('useCustomRules', String(useCustomRules));
+      form.append('bundle', file, fileName);
+      const response = await axios.post(`${APIGEE_LINT_BASE_URL}/validate`, form);
+      return { success: true, data: response.data };
+    } catch (error) {
+      return {
+        success: false,
+        error: unwrapError(error, 'Failed to run Apigee lint scan'),
+      };
+    }
+  },
 };

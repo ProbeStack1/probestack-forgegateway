@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import AppLayout from './components/ui/AppLayout';
 import { LayoutProvider } from './context/LayoutContext';
 import ProxyGeneration from './pages/ProxyGeneration';
@@ -34,67 +34,39 @@ import { DevelopersView } from './pages/Gateway/DevelopersView.jsx';
 import ApigeeMainPage from './pages/Apigee/ApigeePage.jsx';
 
 
-// Helper: Validate token
-const validateToken = async (token, email) => {
-  try {
-    const response = await fetch('', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-User-Email': email,
-      },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
+const AUTH_COOKIE_NAME = import.meta.env.VITE_AUTH_COOKIE_NAME || 'ps_auth_token';
+const PROBESTACK_LOGIN_URL = import.meta.env.VITE_PROBESTACK_LOGIN_URL || 'https://probestack.io/login';
+
+const readCookie = (name) => {
+  if (typeof document === 'undefined') return '';
+
+  const cookie = document.cookie
+    .split('; ')
+    .find((row) => row.startsWith(`${name}=`));
+
+  return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : '';
+};
+
+const isAuthenticated = () => Boolean(readCookie(AUTH_COOKIE_NAME));
+
+const getLoginRedirectUrl = () => {
+  const loginUrl = new URL(PROBESTACK_LOGIN_URL);
+  loginUrl.searchParams.set('returnTo', window.location.href);
+  return loginUrl.toString();
 };
 
 function AuthHandler() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const handleAuth = async () => {
-      // 1. Check localStorage
-      const storedEmail = localStorage.getItem('userEmail');
-      const storedToken = localStorage.getItem('authToken');
+    if (isAuthenticated()) {
+      setLoading(false);
+      return;
+    }
 
-      if (storedEmail && storedToken) {
-        // Already authenticated – clean URL if needed and continue
-        if (searchParams.toString()) {
-          navigate(window.location.pathname, { replace: true });
-        }
-        setLoading(false);
-        return;
-      }
-
-      // 2. Check URL parameters
-      const userEmail = searchParams.get('userEmail');
-      const authToken = searchParams.get('authToken');
-
-      if (userEmail && authToken) {
-        // validate the token
-        const isValid = await validateToken(authToken, userEmail);
-        if (isValid) {
-        // Store in localStorage
-        localStorage.setItem('userEmail', userEmail);
-        localStorage.setItem('authToken', authToken);
-        // Clean the URL – remove the query parameters
-        navigate(window.location.pathname, { replace: true });
-        setLoading(false);
-        return;
-        }
-        // If validation fails, treat as no auth (fall through to redirect)
-      }
-
-      // 3. No auth found – redirect to login page
-      // window.location.href = 'https://probestack.io/login';
-       setLoading(false);
-    };
-
-    handleAuth();
-  }, [searchParams, navigate]);
+    window.location.replace(getLoginRedirectUrl());
+  }, [navigate]);
 
   // Show a loading state while checking auth (prevents flashing)
   if (loading) {
@@ -105,7 +77,7 @@ function AuthHandler() {
     );
   }
 
-  // Render routes once authenticated (or if URL params provided and stored)
+  // Render routes once authenticated
   return (
     <Routes>
       {/* Routes with their own layout (no shared AppLayout) */}

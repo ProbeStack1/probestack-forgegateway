@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './components/ui/AppLayout';
 import { LayoutProvider } from './context/LayoutContext';
 import ProxyGeneration from './pages/ProxyGeneration';
@@ -32,41 +32,23 @@ import APIProductsManager from './pages/Gateway/APIProductsManager.jsx';
 import ApigeeAppsManager from './pages/Gateway/ApigeeAppsManager.jsx';
 import { DevelopersView } from './pages/Gateway/DevelopersView.jsx';
 import ApigeeMainPage from './pages/Apigee/ApigeePage.jsx';
-
-
-const AUTH_COOKIE_NAME = import.meta.env.VITE_AUTH_COOKIE_NAME || 'ps_auth_token';
-const PROBESTACK_LOGIN_URL = import.meta.env.VITE_PROBESTACK_LOGIN_URL || 'https://probestack.io/login';
-
-const readCookie = (name) => {
-  if (typeof document === 'undefined') return '';
-
-  const cookie = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith(`${name}=`));
-
-  return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : '';
-};
-
-const isAuthenticated = () => Boolean(readCookie(AUTH_COOKIE_NAME));
-
-const getLoginRedirectUrl = () => {
-  const loginUrl = new URL(PROBESTACK_LOGIN_URL);
-  loginUrl.searchParams.set('returnTo', window.location.href);
-  return loginUrl.toString();
-};
+import { isAuthenticated, redirectToLogin } from './utils/auth.js';
 
 function AuthHandler() {
-  const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
 
+  // Re-checked on every navigation (not just on mount) so that a logout
+  // performed in the main app is picked up the next time the user does
+  // anything here, without requiring a manual page reload.
   useEffect(() => {
     if (isAuthenticated()) {
       setLoading(false);
       return;
     }
 
-    window.location.replace(getLoginRedirectUrl());
-  }, [navigate]);
+    redirectToLogin();
+  }, [location.pathname]);
 
   // Show a loading state while checking auth (prevents flashing)
   if (loading) {

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { isAuthenticated, redirectToLogin } from "../utils/auth.js";
 
 // Create an axios instance with Authorization interceptor
 const authenticatedAxios = axios.create();
@@ -10,6 +11,14 @@ const authenticatedAxios = axios.create();
 // audience (API identifier) if decodable JWTs are required.
 authenticatedAxios.interceptors.request.use(
   (config) => {
+    // Any user-triggered API call re-checks the main-app session cookie, so a
+    // logout elsewhere is caught the moment the user does something here
+    // instead of only on the next page reload.
+    if (!isAuthenticated()) {
+      redirectToLogin();
+      return Promise.reject(new axios.Cancel("Session expired, redirecting to login"));
+    }
+
     const raw = localStorage.getItem("authToken");
     const token = typeof raw === "string" ? raw.trim() : "";
 

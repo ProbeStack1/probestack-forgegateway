@@ -976,6 +976,7 @@ export const ProxiesView = ({ showMessage }) => {
 
     return (
         <div className="flex flex-col gap-2 p-6">
+            <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
             {/* ... header and filters (unchanged) ... */}
             <div className="flex justify-between items-center flex-wrap gap-3">
                 <h2 className="text-2xl font-bold text-white mb-1">API</h2>
@@ -1039,9 +1040,9 @@ export const ProxiesView = ({ showMessage }) => {
                 </div>
             ) : (
                 <>
-                    <div className="bg-[#111520] rounded-xl border border-[#1f2840] overflow-hidden">
+                    <div className="overflow-hidden rounded-lg border border-dark-700">
                         <table className="w-full text-sm">
-                            <thead className="bg-[#1a1f2e] border-b border-[#1f2840]">
+                            <thead className="bg-dark-800/70 border-b border-dark-700">
                                 <tr>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Type</th>
@@ -1053,7 +1054,7 @@ export const ProxiesView = ({ showMessage }) => {
                             </thead>
                             <tbody>
                                 {paginatedProxies.map((proxy) => (
-                                    <tr key={proxy.name} className="border-b border-[#1f2840] hover:bg-[#1a1f2e] cursor-pointer" onClick={() => handleProxySelect(proxy)}>
+                                    <tr key={proxy.name} className="border-b border-dark-700 hover:bg-dark-800/40 cursor-pointer" onClick={() => handleProxySelect(proxy)}>
                                         <td className="p-3 text-white font-mono text-sm">{proxy.name}</td>
                                         <td className="p-3">
                                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${(proxy.type || "REST") === "REST" ? "bg-blue-500/20 text-blue-300" :
@@ -1098,6 +1099,7 @@ export const ProxiesView = ({ showMessage }) => {
                     <PaginationControls currentPage={proxyPage} totalItems={filteredProxies.length} pageSize={proxyPageSize} onPageChange={setProxyPage} onPageSizeChange={setProxyPageSize} />
                 </>
             )}
+            </div>
 
             {/* Create Proxy Modal - modified Backend section */}
             <Dialog open={createProxyModal.open} onOpenChange={(open) => {

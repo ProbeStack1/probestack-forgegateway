@@ -626,6 +626,7 @@ export const DevelopersView = ({ showMessage }) => {
 
   return (
     <div className="flex flex-col gap-4 p-6">
+      <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold text-white mb-1">Developers</h2>
@@ -661,9 +662,9 @@ export const DevelopersView = ({ showMessage }) => {
         </div>
       ) : (
         <>
-          <div className="bg-[#111520] rounded-xl border border-[#1f2840] overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-dark-700">
             <table className="w-full text-sm">
-              <thead className="bg-[#1a1f2e] border-b border-[#1f2840]">
+              <thead className="bg-dark-800/70 border-b border-dark-700">
                 <tr>
                   <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
                   <th className="text-left p-3 text-[#5a6a8a] font-medium">Email</th>
@@ -675,7 +676,7 @@ export const DevelopersView = ({ showMessage }) => {
               </thead>
               <tbody>
                 {paginatedDevelopers.map((dev) => (
-                  <tr key={dev.userName} className="border-b border-[#1f2840] hover:bg-[#1a1f2e]">
+                  <tr key={dev.userName} className="border-b border-dark-700 hover:bg-dark-800/40">
                     <td className="p-3 text-white">{dev.name}</td>
                     <td className="p-3 text-[#7f8fa8]">{dev.email}</td>
                     <td className="p-3 text-[#7f8fa8]">{dev.userName}</td>
@@ -713,6 +714,7 @@ export const DevelopersView = ({ showMessage }) => {
           />
         </>
       )}
+      </div>
 
       {renderCreateEditModal()}
       {renderViewModal()}

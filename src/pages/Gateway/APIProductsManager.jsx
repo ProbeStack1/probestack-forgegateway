@@ -624,6 +624,7 @@ const APIProductsManager = ({
   if (view === 'list') {
     return (
       <div className="p-4 space-y-2">
+        <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
         <h2 className="text-2xl font-bold text-white mb-1">API Products</h2>
         <p className="text-sm text-gray-400" style={{marginBottom:"1rem"}}>Define and manage API product bundles</p>
         <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
@@ -659,9 +660,9 @@ const APIProductsManager = ({
         {loadingProducts ? (
           <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#ff5b1f]" /></div>
         ) : (
-          <div className="bg-[#111520] rounded-xl border border-[#1f2840] overflow-hidden">
+          <div className="overflow-hidden rounded-lg border border-dark-700">
             <table className="w-full text-sm">
-              <thead className="bg-[#1a1f2e] border-b border-[#1f2840]">
+              <thead className="bg-dark-800/70 border-b border-dark-700">
                 <tr>
                   <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
                   <th className="text-left p-3 text-[#5a6a8a] font-medium">Display Name</th>
@@ -672,7 +673,7 @@ const APIProductsManager = ({
               </thead>
               <tbody>
                 {paginatedProducts.map(product => (
-                  <tr key={product.name} className="border-b border-[#1f2840] hover:bg-[#1a1f2e] cursor-pointer">
+                  <tr key={product.name} className="border-b border-dark-700 hover:bg-dark-800/40 cursor-pointer">
                     <td className="p-3 text-white" onClick={() => handleView(product)}>{product.name}</td>
                     <td className="p-3 text-[#7f8fa8]" onClick={() => handleView(product)}>{product.displayName || '-'}</td>
                     <td className="p-3 text-[#7f8fa8]" onClick={() => handleView(product)}>{product.environments || selectedEnv}</td>
@@ -705,6 +706,7 @@ const APIProductsManager = ({
             />
           </div>
         )}
+        </div>
 
         {/* MODAL for Create/Edit */}
         {isModalOpen && (

@@ -279,7 +279,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
     "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 transition-colors hover:text-slate-300";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0b0e16]">
+    <div className="flex h-full min-h-0 flex-col bg-[#0e172a]">
       {showHeader && <GatewayHeader />}
       <div className="flex min-h-0 flex-1">
       {/* ==================== SIDEBAR ==================== */}

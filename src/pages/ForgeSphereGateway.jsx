@@ -8,7 +8,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
   const showMessage = (text, type = "success") => setToast({ message: text, type });
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0b0e16] text-white">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#0e172a] text-white">
       {toast.message && (
         <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: "", type: "success" })} />
       )}

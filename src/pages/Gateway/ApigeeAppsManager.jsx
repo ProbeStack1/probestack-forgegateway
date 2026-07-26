@@ -281,7 +281,7 @@ export default function ApigeeAppsManager({
 
   // ----- Render -----
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       {/* Optional Application Id Search Section */}
       {showAppIdSec && (
         <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-5 space-y-4">

@@ -114,6 +114,7 @@ export const SharedFlowsView = ({ showMessage }) => {
 
     return (
         <div className="flex flex-col gap-4 p-6">
+            <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
             <h2 className="text-2xl font-bold text-white mb-1">Function</h2>
             <div className="flex justify-between items-center">
                 <GatewayContextSelector
@@ -157,9 +158,9 @@ export const SharedFlowsView = ({ showMessage }) => {
                 </div>
             ) : (
                 <>
-                    <div className="bg-[#111520] rounded-xl border border-[#1f2840] overflow-hidden">
+                    <div className="overflow-hidden rounded-lg border border-dark-700">
                         <table className="w-full text-sm">
-                            <thead className="bg-[#1a1f2e] border-b border-[#1f2840]">
+                            <thead className="bg-dark-800/70 border-b border-dark-700">
                                 <tr>
                                     <th className="text-left p-3 text-[#5a6a8a]">Name</th>
                                     <th className="text-left p-3 text-[#5a6a8a]">Environment</th>
@@ -172,7 +173,7 @@ export const SharedFlowsView = ({ showMessage }) => {
                                 {paginatedSharedFlows.map((sf) => (
                                     <tr
                                         key={sf.id || sf.name}
-                                        className="border-b border-[#1f2840] hover:bg-[#1a1f2e] cursor-pointer"
+                                        className="border-b border-dark-700 hover:bg-dark-800/40 cursor-pointer"
                                         onClick={() => openSharedFlowDetail(sf)}
                                     >
                                         <td className="p-3 text-white font-mono text-sm">{sf.name}</td>
@@ -278,6 +279,7 @@ export const SharedFlowsView = ({ showMessage }) => {
                     />
                 </>
             )}
+            </div>
             {/* Create Shared Flow Modal */}
             {/* Create Shared Flow Modal */}
             <Dialog open={createModalOpen.open} onOpenChange={(open) => setCreateModalOpen(prev => ({ ...prev, open }))}>

@@ -160,7 +160,7 @@ export default function GatewayDashboard() {
     ];
 
     return (
-        <div className="min-h-full bg-[#0b0e16] p-6 text-white">
+        <div className="min-h-full p-6 text-white">
             {/* Header */}
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div>

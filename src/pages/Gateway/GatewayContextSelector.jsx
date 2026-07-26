@@ -125,15 +125,15 @@ export const GatewayContextSelector = ({
                 const envTypes = result.data.selectedEnvironments || [];
 
                 setEnvironments(envTypes);
-                setSelectedEnv(envTypes[0] || '');
+                setSelectedEnv('ALL');
             } else {
                 setEnvironments([]);
-                setSelectedEnv('');
+                setSelectedEnv('ALL');
             }
         } catch (err) {
             console.error('Error fetching environment:', err);
             setEnvironments([]);
-            setSelectedEnv('');
+            setSelectedEnv('ALL');
         } finally {
             setLoadingEnvs(false);
         }

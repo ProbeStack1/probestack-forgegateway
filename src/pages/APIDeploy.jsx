@@ -291,7 +291,7 @@ const typeLabels = {
   [DEPLOYMENT_TYPES.APIGEE_SHARED_FLOW]: 'Shared Flow',
   [DEPLOYMENT_TYPES.KONG_GATEWAY_SERVICE]: 'Kong Service',
   [DEPLOYMENT_TYPES.MCP]: 'MCP',
-  'apigee-target-server': 'Target Server',
+  'apigee-target-server': 'Backend Service',
   'apigee-kvm': 'KVM',
   'apigee-app': 'Developer App',
   'apigee-product': 'API Product',

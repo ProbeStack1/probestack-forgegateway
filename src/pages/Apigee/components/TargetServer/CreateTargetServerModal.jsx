@@ -171,10 +171,10 @@ export default function CreateTargetServerModal({
                 <div className="flex justify-between items-center px-6 py-4 border-b border-dark-700" style={{ height: "4.5rem" }}>
                     <div>
                         <h2 className="text-lg font-semibold text-white">
-                            {editData ? `Edit ${isGateway ? "Backend Service" : "Target Server"}` : `Create a ${isGateway ? "Backend Service" : "Target Server"}`}
+                            {editData ? "Edit Backend Service" : "Create a Backend Service"}
                         </h2>
                         <p className="text-sm text-gray-400">
-                            {!editData && `Create a ${isGateway ? "backend service" : "target server"} in a few simple steps.`}
+                            {!editData && "Create a backend service in a few simple steps."}
                         </p>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-white">
@@ -271,7 +271,7 @@ export default function CreateTargetServerModal({
                     <div className="grid grid-cols-2 gap-6">
                         <div>
                             <label className="text-sm text-gray-400">
-                                {isGateway ? "Backend Service Name*" : "Target Server Name*"}
+                                Backend Service Name*
                             </label>
                             <input
                                 value={form.name}

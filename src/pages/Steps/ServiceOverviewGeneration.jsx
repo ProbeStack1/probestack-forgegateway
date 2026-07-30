@@ -659,10 +659,10 @@ const ServiceOverviewGeneration = ({
                 <div className="flex flex-col gap-4">
                     {/* Target Server Component */}
                     <Card className="p-4" style={{ backgroundColor: 'rgb(22 27 48 / var(--tw-bg-opacity, 1))' }}>
-                        <CardTitle className="mb-3">{selectedGateway === 'Kong' ? 'Upstream Service' : 'Target Server'}</CardTitle>
+                        <CardTitle className="mb-3">{selectedGateway === 'Kong' ? 'Upstream Service' : 'Backend Service'}</CardTitle>
                         <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
-                                <Label htmlFor="backendName" className="text-xs text-gray-300">{selectedGateway === 'Kong' ? 'Upstream Service Name' : 'Target Server Name'}</Label>
+                                <Label htmlFor="backendName" className="text-xs text-gray-300">{selectedGateway === 'Kong' ? 'Upstream Service Name' : 'Backend Service Name'}</Label>
                                 <Input
                                     id="backendName"
                                     placeholder="Backend service name"

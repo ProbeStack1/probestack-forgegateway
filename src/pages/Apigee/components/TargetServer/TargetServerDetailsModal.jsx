@@ -25,7 +25,7 @@ export default function TargetServerDetailsModal({
             <div className="w-full max-w-xl rounded-xl border border-dark-700 bg-[#15192b] shadow-xl">
                 <div className="flex items-center justify-between border-b border-dark-700 px-5 py-4">
                     <div>
-                        <h3 className="text-base font-semibold text-white">Target Server Details</h3>
+                        <h3 className="text-base font-semibold text-white">Backend Service Details</h3>
                         <p className="text-xs text-gray-400">Fetched from Apigee</p>
                     </div>
                     <button

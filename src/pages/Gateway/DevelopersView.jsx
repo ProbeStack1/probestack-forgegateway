@@ -149,6 +149,11 @@ export const DevelopersView = ({ showMessage }) => {
     return new Date(timestamp).toLocaleString();
   };
 
+  const truncateText = (text, maxLength = 10) => {
+    if (!text) return text;
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  };
+
   const validateForm = () => {
     const errors = {};
     if (!formData.email.trim()) errors.email = "Email is required";
@@ -681,7 +686,9 @@ export const DevelopersView = ({ showMessage }) => {
                     <td className="p-3 text-[#7f8fa8]">{dev.email}</td>
                     <td className="p-3 text-[#7f8fa8]">{dev.userName}</td>
                     <td className="p-3 text-[#7f8fa8]">{dev.appsCount}</td>
-                    <td className="p-3 text-[#7f8fa8]">{formatDate(dev.createdAt)}</td>
+                    <td className="p-3 text-[#7f8fa8] whitespace-nowrap" title={formatDate(dev.createdAt)}>
+                      {truncateText(formatDate(dev.createdAt))}
+                    </td>
                     <td className="p-3">
                       <div className="flex items-center gap-2">
                         <button onClick={() => openViewModal(dev)} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="View">

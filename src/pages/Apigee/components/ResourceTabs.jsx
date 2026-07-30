@@ -2,7 +2,7 @@ import { cn } from "../../../lib/utils";
 
 export default function ResourceTabs({ activeTab, onChange }) {
   const tabs = [
-    { id: "target-server", label: "Target Server" },
+    { id: "target-server", label: "Backend Service" },
     { id: "kvm", label: "KVM" },
   ];
 

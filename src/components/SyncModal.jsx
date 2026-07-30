@@ -6,7 +6,7 @@ import { apigeeApiFetch } from "../services/apigeeApiService";
 const labelMap = {
     proxy: "Proxy",
     sharedflow: "Shared Flow",
-    targetserver: "Target Server",
+    targetserver: "Backend Service",
     kvm: "KVM",
     app: "App",
 };
@@ -507,7 +507,7 @@ export const SharedFlowSyncModal = ({ onClose }) => (
 );
 
 export const TargetServerSyncModal = (props) => (
-    <SyncBaseModal title="Sync Target Server" type="targetserver" {...props} />
+    <SyncBaseModal title="Sync Backend Service" type="targetserver" {...props} />
 );
 
 export const KVMSyncModal = (props) => (

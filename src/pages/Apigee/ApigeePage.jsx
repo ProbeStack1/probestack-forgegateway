@@ -102,7 +102,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
         { label: "Trust Store", value: "Key Store" },
       ]
       : [
-        { label: "Target Server", value: "Backend Service" },
+        { label: "Backend Service", value: "Backend Service" },
         { label: "KVM", value: "KVM" },
         { label: "Apps", value: "App" },
         { label: "Product", value: "Product" },
@@ -828,11 +828,11 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
            {showHeader && <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-5 space-y-4">
 
               <h2 className="text-lg font-semibold">
-                {showHeader ? "View Target Servers" : "View Backend Services"}
+                View Backend Services
               </h2>
 
               <p className="text-sm text-gray-400">
-                Check out your target servers based on a gateway type and Application Id.
+                Check out your backend services based on a gateway type and Application Id.
               </p>
 
               {/* Filters Row */}
@@ -846,7 +846,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-semibold">
-                    {showHeader ? "Target Servers" : "Backend Services"}
+                    Backend Services
                   </h3>
                   <p className="text-sm text-gray-400">
                     Use the filters to focus on the resources you want

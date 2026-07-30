@@ -2164,7 +2164,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <span className="text-xs text-slate-400">Target Endpoint</span>
                                             <span className="text-sm text-white font-mono text-right max-w-[60%]">
                                                 {getLatestRevisionData()?.targetServer
-                                                    ? `Target Server: ${getLatestRevisionData().targetServer}`
+                                                    ? `Backend Service: ${getLatestRevisionData().targetServer}`
                                                     : (getLatestRevisionData()?.targetUrl || '/default')}
                                             </span>
                                         </div>

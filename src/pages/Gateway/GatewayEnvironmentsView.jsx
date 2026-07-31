@@ -138,7 +138,7 @@ const GatewayEnvironmentsView = ({ showMessage }) => {
             {/* Page Header */}
             <div className="mb-2">
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
-                    Gateway Environments
+                    Gateway Overview
                 </h2>
                 <p className="text-slate-400 mt-1">
                     View and manage your provisioned gateway environments across all approved organizations

@@ -156,8 +156,8 @@ export const GatewayContextSelector = ({
     const renderSelect = ({ label, value, onChange, options, loading, disabled, placeholder, getOptionLabel, getOptionValue, minWidth = '180px' }) => {
         const safeOptions = Array.isArray(options) ? options : [];
         return (
-            <div className="relative border border-[#2a3550] rounded-md bg-[#0f1117] focus-within:ring-1 focus-within:ring-[#ff5b1f] focus-within:border-[#ff5b1f] transition-all">
-                <label className="absolute -top-2 left-3 px-1 text-xs font-medium text-slate-400 bg-[#0f1117] z-10">
+            <div className="relative border border-[#2a3550] rounded-md bg-[#1a1f2e] focus-within:ring-1 focus-within:ring-[#ff5b1f] focus-within:border-[#ff5b1f] transition-all">
+                <label className="absolute -top-2 left-3 px-1 text-xs font-medium text-slate-400 bg-[#1a1f2e] z-10">
                     {label}
                 </label>
                 <div className="relative">
@@ -168,7 +168,7 @@ export const GatewayContextSelector = ({
                         disabled={disabled || loading}
                         style={{ minWidth }}
                     >
-                        <option value="" className="bg-[#0f1117] text-slate-400">{placeholder}</option>
+                        <option value="" className="bg-[#1a1f2e] text-slate-400">{placeholder}</option>
                         {safeOptions.map(opt => (
                             <option key={getOptionValue(opt)} value={getOptionValue(opt)} className="bg-[#1a1f2e] text-white">
                                 {getOptionLabel(opt)}
@@ -227,8 +227,8 @@ export const GatewayContextSelector = ({
                 minWidth: '140px',
             })} */}
             {showEnv && (
-                <div className="relative border border-[#2a3550] rounded-md bg-[#0f1117] focus-within:ring-1 focus-within:ring-[#ff5b1f] focus-within:border-[#ff5b1f] transition-all">
-                    <label className="absolute -top-2 left-3 px-1 text-xs font-medium text-slate-400 bg-[#0f1117] z-10">
+                <div className="relative border border-[#2a3550] rounded-md bg-[#1a1f2e] focus-within:ring-1 focus-within:ring-[#ff5b1f] focus-within:border-[#ff5b1f] transition-all">
+                    <label className="absolute -top-2 left-3 px-1 text-xs font-medium text-slate-400 bg-[#1a1f2e] z-10">
                         Gateway Env
                     </label>
                     <div className="relative">
@@ -238,8 +238,8 @@ export const GatewayContextSelector = ({
                             className="w-full bg-transparent border-0 rounded-md px-3 py-2 pr-8 text-sm text-white focus:outline-none appearance-none cursor-pointer"
                             style={{ minWidth: '140px' }}
                         >
-                            <option value={ALL_ENV} className="bg-[#0f1117] text-slate-200">All Environments</option>
-                            <option value={NOT_DEPLOYED} className="bg-[#0f1117] text-slate-200">Not Deployed</option>
+                            <option value={ALL_ENV} className="bg-[#1a1f2e] text-slate-200">All Environments</option>
+                            <option value={NOT_DEPLOYED} className="bg-[#1a1f2e] text-slate-200">Not Deployed</option>
                             {Array.isArray(environments) && environments.map(env => (
                                 <option key={env} value={env} className="bg-[#1a1f2e] text-white">
                                     {env}

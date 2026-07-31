@@ -561,7 +561,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                   onClick={() => selectSidebarMenu("gateway-env")}
                 >
                   <Aperture className={sidebarIconClass(selectedMenuItem === "gateway-env", "text-lime-500")} />
-                  {!sidebarCollapsed && <span>Gateway Information</span>}
+                  {!sidebarCollapsed && <span>Gateway</span>}
                 </div>
               </div>
             )}

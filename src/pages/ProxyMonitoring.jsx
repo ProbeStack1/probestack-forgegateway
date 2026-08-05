@@ -11,6 +11,12 @@ import {
   Check,
   Clock,
   Loader2,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Sigma,
+  Gauge,
+  Hash,
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { cn } from '../lib/utils';
@@ -18,6 +24,7 @@ import {
   fetchApigeeToken,
   fetchApigeeProxies,
   fetchApigeeStats as fetchApigeeStatsShared,
+  fetchApigeeStatsDetailed,
   getTimeUnitForRange,
 } from '../services/apigeeStatsService';
 import '../index.css';
@@ -125,6 +132,112 @@ const fetchApigeeMetric = async (token, environment, proxyName, metric, timeRang
   return transform(seriesPerSelect);
 };
 
+// --- Format helpers for turning raw epoch-ms timestamps into readable labels ---
+const formatClockTime = (ts) =>
+  ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+const formatFullDateTime = (ts) =>
+  ts ? new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' }) : '—';
+const formatMetricValue = (value, unit) => {
+  const n = typeof value === 'number' ? value : parseFloat(value) || 0;
+  const rounded = Number.isInteger(n) ? n : Math.round(n * 100) / 100;
+  return `${rounded.toLocaleString()}${unit ? ` ${unit}` : ''}`;
+};
+
+// --- Labeled Bar Chart: one bar per data point, with its exact value printed above the bar,
+// its timestamp printed below, a y-axis value scale on the left, and a hover tooltip (native
+// SVG <title>) giving the full date/time + value — so nothing on the chart is left unlabeled.
+// Bars scroll horizontally once there are more points than comfortably fit.
+const MetricBarChart = ({ points, color = '#ff5b1f', unit = '', emptyMessage, isExpanded = false }) => {
+  if (!points || points.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-center text-gray-500 text-xs px-4">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  const values = points.map((p) => p.value);
+  const maxValue = Math.max(...values, 0);
+  const niceMax = maxValue === 0 ? 1 : maxValue;
+  const gridLevels = [1, 0.75, 0.5, 0.25, 0];
+
+  const barWidth = isExpanded ? 56 : 40;
+  const topMargin = 14; // room for the value label above the tallest bar
+  const plotHeight = isExpanded ? 190 : 96;
+  const bottomSpace = 34; // room for the rotated time label below each bar
+  const svgHeight = topMargin + plotHeight + bottomSpace;
+  const svgWidth = Math.max(points.length * barWidth, 200);
+
+  // Thin the x-axis time labels once there are too many bars to label every one legibly —
+  // the exact time is always still available via the hover tooltip on the bar itself.
+  const labelEvery = points.length <= 15 ? 1 : Math.ceil(points.length / 15);
+
+  const formatBarValue = (v) => {
+    if (Math.abs(v) >= 1000) return `${Math.round(v / 100) / 10}k`;
+    return Number.isInteger(v) ? v : Math.round(v * 100) / 100;
+  };
+
+  return (
+    <div className="w-full h-full flex">
+      {/* Fixed y-axis value scale */}
+      <div
+        className="flex flex-col justify-between text-right pr-2 text-[9px] text-gray-500 font-mono shrink-0"
+        style={{ height: svgHeight, paddingTop: topMargin, paddingBottom: bottomSpace }}
+      >
+        {gridLevels.map((lvl) => (
+          <span key={lvl}>{Math.round(niceMax * lvl).toLocaleString()}</span>
+        ))}
+      </div>
+
+      {/* Scrollable plot area so every bar/value stays readable even with many points */}
+      <div className="flex-1 overflow-x-auto">
+        <svg width={svgWidth} height={svgHeight} className="block">
+          {gridLevels.map((lvl) => (
+            <line
+              key={lvl}
+              x1={0}
+              x2={svgWidth}
+              y1={topMargin + plotHeight * (1 - lvl)}
+              y2={topMargin + plotHeight * (1 - lvl)}
+              stroke="#2a3149"
+              strokeDasharray="3,3"
+              strokeWidth="1"
+            />
+          ))}
+          {points.map((p, i) => {
+            const barHeight = niceMax === 0 ? 0 : (p.value / niceMax) * plotHeight;
+            const x = i * barWidth + barWidth * 0.2;
+            const w = barWidth * 0.6;
+            const y = topMargin + (plotHeight - barHeight);
+            const labelX = x + w / 2;
+            return (
+              <g key={p.timestamp}>
+                <title>{`${formatFullDateTime(p.timestamp)}\n${formatMetricValue(p.value, unit)}`}</title>
+                <rect x={x} y={y} width={w} height={Math.max(barHeight, 1)} fill={color} rx="2" opacity="0.85" className="hover:opacity-100" />
+                <text x={labelX} y={Math.max(y - 4, topMargin - 4)} fontSize="9" fill="#cbd5e1" textAnchor="middle" className="font-mono">
+                  {formatBarValue(p.value)}
+                </text>
+                {i % labelEvery === 0 && (
+                  <text
+                    x={labelX}
+                    y={topMargin + plotHeight + 14}
+                    fontSize="9"
+                    fill="#6b7280"
+                    textAnchor="end"
+                    transform={`rotate(-45, ${labelX}, ${topMargin + plotHeight + 14})`}
+                  >
+                    {formatClockTime(p.timestamp)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+};
+
 // --- Mini Sparkline Chart Component (unchanged) ---
 const MiniChart = ({
   data,
@@ -208,14 +321,19 @@ export default function ProxyMonitoring({ showHeader = true }) {
   const [isGraphsOpen, setIsGraphsOpen] = useState(false);
   const [refreshTimestamp, setRefreshTimestamp] = useState(Date.now());
   const [expandedWidget, setExpandedWidget] = useState(null);
+  // Which canned-graph card currently has its Total/Average/Peak/Min breakdown open —
+  // toggled by the BarChart2 ("stats") button beside that card's Maximize button.
+  const [statsWidget, setStatsWidget] = useState(null);
 
-  const graphOptions = ['Traffic', 'Error Rate', 'Latency', 'Throughput', 'Cache Hit', 'Request Size', 'Bandwidth'];
+  const graphOptions =['Traffic', 'Error Rate', 'Latency', 'Throughput', 'Cache Hit', 'Request Size', 'Bandwidth'];
   const [selectedGraphs, setSelectedGraphs] = useState(['Traffic', 'Error Rate', 'Latency', 'Throughput', 'Cache Hit', 'Request Size']);
 
   const [dimension, setDimension] = useState('apiproxy');
   const [selectedMetrics, setSelectedMetrics] = useState([]);
   const [isMetricsOpen, setIsMetricsOpen] = useState(false);
+  // metricData[expr] = [{ timestamp, value }, ...] sorted oldest → newest
   const [metricData, setMetricData] = useState({});
+  const [metricNotices, setMetricNotices] = useState([]);
 
   const [liveData, setLiveData] = useState({});
   const [loading, setLoading] = useState(false);
@@ -277,6 +395,7 @@ export default function ProxyMonitoring({ showHeader = true }) {
     if ((selectedGraphs.length === 0 && selectedMetrics.length === 0) || !proxy) {
       setLiveData({});
       setMetricData({});
+      setMetricNotices([]);
       setError(null);
       return;
     }
@@ -288,7 +407,7 @@ export default function ProxyMonitoring({ showHeader = true }) {
       const token = await fetchToken();
       if (!token) throw new Error('Unable to get access token');
 
-      const [graphResults, metricSeriesArr] = await Promise.all([
+      const [graphResults, metricResult] = await Promise.all([
         Promise.all(
           selectedGraphs.map(async (graphTitle) => {
             const dataPoints = await fetchApigeeMetric(token, environment, proxy, graphTitle, timeRange, dimension);
@@ -298,8 +417,8 @@ export default function ProxyMonitoring({ showHeader = true }) {
         // All selected metrics are requested in a single combined `select=m1,m2,...` call,
         // matching the Apigee Stats API's multi-metric query pattern (one call, comma-joined select).
         selectedMetrics.length > 0
-          ? fetchApigeeStats(token, environment, dimension, proxy, selectedMetrics, timeRange)
-          : Promise.resolve([]),
+          ? fetchApigeeStatsDetailed(token, environment, dimension, selectedMetrics, timeRange, `apiproxy eq '${proxy}'`)
+          : Promise.resolve({ series: {}, notices: [] }),
       ]);
 
       const newLiveData = {};
@@ -308,11 +427,8 @@ export default function ProxyMonitoring({ showHeader = true }) {
       });
       setLiveData(newLiveData);
 
-      const newMetricData = {};
-      selectedMetrics.forEach((metricExpr, idx) => {
-        newMetricData[metricExpr] = metricSeriesArr[idx] || [];
-      });
-      setMetricData(newMetricData);
+      setMetricData(metricResult.series || {});
+      setMetricNotices(metricResult.notices || []);
 
       setRefreshTimestamp(Date.now());
     } catch (err) {
@@ -355,6 +471,10 @@ export default function ProxyMonitoring({ showHeader = true }) {
     setExpandedWidget((prev) => (prev === widgetId ? null : widgetId));
   };
 
+  const handleStatsToggle = (widgetId) => {
+    setStatsWidget((prev) => (prev === widgetId ? null : widgetId));
+  };
+
   const handleOpenAlert = () => {
     alert('🔔 Alerts view\nAPI Error Rate > 5% detected\nTraffic spike detected on Proxy A');
   };
@@ -392,8 +512,14 @@ export default function ProxyMonitoring({ showHeader = true }) {
     }
 
     const isExpanded = expandedWidget === id;
+    const showStats = statsWidget === id;
     const currentValue = data.length > 0 ? data[data.length - 1] : 0;
     const emptyMessage = emptyMessageByGraph[title] || 'No data recorded for this proxy in the selected window';
+
+    const total = data.reduce((a, b) => a + b, 0);
+    const avg = data.length ? total / data.length : 0;
+    const peak = data.length ? Math.max(...data) : 0;
+    const minVal = data.length ? Math.min(...data) : 0;
 
     return (
       <Card
@@ -405,10 +531,14 @@ export default function ProxyMonitoring({ showHeader = true }) {
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-medium text-white">{title}</h3>
           <div className="flex items-center gap-1.5">
-            <button className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white">
+            <button
+              onClick={() => handleStatsToggle(id)}
+              className={cn('p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white', showStats && 'bg-dark-800/80 text-primary')}
+              title={showStats ? 'Hide stats' : 'Show stats'}
+            >
               <BarChart2 className="w-4 h-4" />
             </button>
-            <button onClick={() => handleExpandToggle(id)} className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white">
+            <button onClick={() => handleExpandToggle(id)} className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white" title={isExpanded ? 'Collapse' : 'Expand'}>
               <Maximize2 className={cn('w-4 h-4', isExpanded && 'text-primary')} />
             </button>
             <button className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white">
@@ -450,6 +580,32 @@ export default function ProxyMonitoring({ showHeader = true }) {
             </div>
           )}
         </div>
+
+        {/* --- Stats panel: toggled by the BarChart2 button beside Maximize --- */}
+        {showStats && !isLoading && !hasError && data.length > 0 && (
+          <div className={cn('grid gap-3 mt-3', isExpanded ? 'grid-cols-4' : 'grid-cols-2')}>
+            {[
+              { key: 'total', icon: Sigma, label: 'Total', value: total },
+              { key: 'average', icon: Gauge, label: 'Average', value: avg },
+              { key: 'peak', icon: TrendingUp, label: 'Peak', value: peak },
+              { key: 'min', icon: TrendingDown, label: 'Min', value: minVal },
+            ].map(({ key, icon: Icon, label, value }) => (
+              <div
+                key={key}
+                className="relative overflow-hidden rounded-xl border border-dark-700/80 bg-gradient-to-br from-[#1a1f33] to-[#15192b] px-3 pt-3 pb-2.5 shadow-sm hover:border-dark-600 transition-colors"
+              >
+                <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ backgroundColor: color, opacity: 0.7 }} />
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="flex items-center justify-center w-6 h-6 rounded-md shrink-0" style={{ backgroundColor: `${color}22`, color }}>
+                    <Icon className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 truncate">{label}</span>
+                </div>
+                <div className="text-lg font-bold text-white leading-tight truncate">{formatMetricValue(value, unit)}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     );
   };
@@ -472,7 +628,8 @@ export default function ProxyMonitoring({ showHeader = true }) {
 
   // --- Ad-hoc Metric Widget: driven by the Dimension/Metric filters, independent of the canned Graphs ---
   const MetricChartWidget = ({ metricExpr, id }) => {
-    const data = metricData[metricExpr] || [];
+    const points = metricData[metricExpr] || [];
+    const data = points.map((p) => p.value);
     const isLoading = loading && !metricData[metricExpr];
     const hasError = error && !metricData[metricExpr];
     const meta = metricMeta[metricExpr] || { label: metricExpr, unit: '', color: '#ff5b1f' };
@@ -481,53 +638,173 @@ export default function ProxyMonitoring({ showHeader = true }) {
     const currentValue = data.length > 0 ? data[data.length - 1] : 0;
     const emptyMessage = `No ${meta.label.toLowerCase()} data recorded for this proxy (grouped by ${dimension}) in the selected window`;
 
+    // --- Summary stats derived from the raw timestamp/value points ---
+    const total = data.reduce((a, b) => a + b, 0);
+    const avg = data.length ? total / data.length : 0;
+    const peakPoint = points.length ? points.reduce((a, b) => (b.value > a.value ? b : a)) : null;
+    const firstTs = points[0]?.timestamp;
+    const lastTs = points[points.length - 1]?.timestamp;
+    const peakShare = total > 0 && peakPoint ? (peakPoint.value / total) * 100 : 0;
+
+    // Trend: average of the second half of the window vs. the first half — a quick read
+    // on whether this metric is climbing, easing, or holding steady right now.
+    let trendPct = null;
+    if (points.length >= 2) {
+      const mid = Math.floor(points.length / 2);
+      const firstHalf = points.slice(0, mid);
+      const secondHalf = points.slice(mid);
+      const firstAvg = firstHalf.reduce((a, p) => a + p.value, 0) / firstHalf.length;
+      const secondAvg = secondHalf.reduce((a, p) => a + p.value, 0) / secondHalf.length;
+      trendPct = firstAvg === 0 ? (secondAvg === 0 ? 0 : 100) : ((secondAvg - firstAvg) / firstAvg) * 100;
+    }
+    const TrendIcon = trendPct === null || Math.abs(trendPct) < 1 ? Minus : trendPct > 0 ? TrendingUp : TrendingDown;
+
     return (
       <Card
         className={cn(
           'bg-[#15192b] border-dark-700 p-4 shadow-sm hover:border-primary/30 transition-all',
-          isExpanded && 'col-span-1 md:col-span-2 border-primary/50'
+          isExpanded && 'col-span-1 md:col-span-2 xl:col-span-3 border-primary/50'
         )}
       >
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-base font-medium text-white">{meta.label}</h3>
-            <p className="text-[11px] text-gray-500 font-mono">{metricExpr}</p>
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <div className="min-w-0">
+            <h3 className="text-base font-medium text-white truncate">{meta.label}</h3>
+            <p className="text-[11px] text-gray-500 font-mono truncate">{metricExpr} • grouped by {dimension}</p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => handleExpandToggle(id)} className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white">
+          <div className="flex items-center gap-2 shrink-0">
+            {!isLoading && !hasError && points.length > 0 && (
+              <div
+                className="flex items-center gap-2 rounded-full border pl-1 pr-3 py-1"
+                style={{ borderColor: `${meta.color}40`, background: `linear-gradient(135deg, ${meta.color}1f, transparent)` }}
+                title="Latest value and trend across this window"
+              >
+                <span
+                  className="flex items-center justify-center w-6 h-6 rounded-full"
+                  style={{ backgroundColor: `${meta.color}26`, color: meta.color }}
+                >
+                  <TrendIcon className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-sm font-semibold text-white leading-none">
+                  {formatMetricValue(currentValue, meta.unit)}
+                </span>
+                {trendPct !== null && (
+                  <span className={cn('text-[10px] font-medium leading-none', Math.abs(trendPct) < 1 ? 'text-gray-500' : trendPct > 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                    {trendPct > 0 ? '+' : ''}{trendPct.toFixed(0)}%
+                  </span>
+                )}
+              </div>
+            )}
+            <button onClick={() => handleExpandToggle(id)} className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white" title={isExpanded ? 'Collapse' : 'Show full details'}>
               <Maximize2 className={cn('w-4 h-4', isExpanded && 'text-primary')} />
             </button>
           </div>
         </div>
 
         <div className={cn('w-full rounded-lg border border-dark-600 bg-[#1a1f33] relative p-2 transition-all', isExpanded ? 'h-80' : 'h-44')}>
-          <div className="absolute inset-0 flex flex-col justify-between px-2 py-3 pointer-events-none">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="w-full border-t border-dark-700/40 border-dashed h-0" />
+          {isLoading ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            </div>
+          ) : hasError ? (
+            <div className="w-full h-full flex flex-col items-center justify-center text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 mb-1" />
+              <span>Failed to load</span>
+            </div>
+          ) : (
+            <MetricBarChart points={points} color={meta.color} unit={meta.unit} emptyMessage={emptyMessage} isExpanded={isExpanded} />
+          )}
+        </div>
+        {points.length > 0 && (
+          <p className="text-[10px] text-gray-500 mt-1">
+            Hover a bar for its exact timestamp and value • range {formatClockTime(firstTs)} – {formatClockTime(lastTs)}
+          </p>
+        )}
+
+        {/* --- Stat analytics: premium at-a-glance tiles for total / average / peak / coverage --- */}
+        {!isLoading && !hasError && points.length > 0 && (
+          <div className={cn('grid gap-3 mt-3', isExpanded ? 'grid-cols-4' : 'grid-cols-2')}>
+            {[
+              {
+                key: 'total',
+                icon: Sigma,
+                label: 'Total',
+                value: formatMetricValue(total, meta.unit),
+                sub: `across ${points.length} point${points.length === 1 ? '' : 's'}`,
+              },
+              {
+                key: 'average',
+                icon: Gauge,
+                label: 'Average',
+                value: formatMetricValue(avg, meta.unit),
+                sub: `per ${getTimeUnitForRange(timeRange)}`,
+              },
+              {
+                key: 'peak',
+                icon: TrendingUp,
+                label: 'Peak',
+                value: formatMetricValue(peakPoint?.value, meta.unit),
+                sub: peakPoint ? `${formatClockTime(peakPoint.timestamp)} • ${peakShare.toFixed(0)}% of total` : '—',
+              },
+              {
+                key: 'points',
+                icon: Hash,
+                label: 'Data Points',
+                value: points.length.toLocaleString(),
+                sub: `${formatClockTime(firstTs)} – ${formatClockTime(lastTs)}`,
+              },
+            ].map(({ key, icon: Icon, label, value, sub }) => (
+              <div
+                key={key}
+                className="relative overflow-hidden rounded-xl border border-dark-700/80 bg-gradient-to-br from-[#1a1f33] to-[#15192b] px-3 pt-3 pb-2.5 shadow-sm hover:border-dark-600 transition-colors"
+              >
+                <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ backgroundColor: meta.color, opacity: 0.7 }} />
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span
+                    className="flex items-center justify-center w-6 h-6 rounded-md shrink-0"
+                    style={{ backgroundColor: `${meta.color}22`, color: meta.color }}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 truncate">{label}</span>
+                </div>
+                <div className="text-lg font-bold text-white leading-tight truncate">{value}</div>
+                <div className="text-[10px] text-gray-500 truncate mt-0.5">{sub}</div>
+              </div>
             ))}
           </div>
-          <div className={cn('absolute inset-4', isExpanded && 'inset-8')}>
-            {isLoading ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+        )}
+
+        {/* --- Expanded view: full per-timestamp breakdown table + data source notice --- */}
+        {isExpanded && !isLoading && !hasError && points.length > 0 && (
+          <div className="mt-4 border-t border-dark-700/60 pt-3">
+            <h4 className="text-xs font-semibold text-gray-400 mb-2">All data points ({points.length})</h4>
+            <div className="max-h-64 overflow-y-auto rounded-md border border-dark-700">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-[#1a1f33] text-gray-500">
+                  <tr>
+                    <th className="text-left font-medium px-3 py-2">Timestamp</th>
+                    <th className="text-right font-medium px-3 py-2">{meta.label}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...points].reverse().map((p) => (
+                    <tr key={p.timestamp} className="border-t border-dark-700/60 text-gray-300 hover:bg-dark-800/40">
+                      <td className="px-3 py-1.5 font-mono">{formatFullDateTime(p.timestamp)}</td>
+                      <td className="px-3 py-1.5 text-right">{formatMetricValue(p.value, meta.unit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {metricNotices.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500">
+                {metricNotices.map((notice, i) => (
+                  <span key={i}>{notice}</span>
+                ))}
               </div>
-            ) : hasError ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-red-400 text-xs">
-                <AlertCircle className="w-5 h-5 mb-1" />
-                <span>Failed to load</span>
-              </div>
-            ) : (
-              <MiniChart data={data} color={meta.color} showLabels={isExpanded} emptyMessage={emptyMessage} />
             )}
           </div>
-          <div className="absolute bottom-2 left-0 right-0 flex justify-between px-4 text-[10px] text-gray-500">
-            <span>{timeRange === '1 hour' ? '00:00' : timeRange === '6 hours' ? '06:00' : '12:00'}</span>
-            <span>Now</span>
-          </div>
-          <div className="absolute top-2 right-3 text-xs text-gray-300 bg-[#1a1f33]/80 px-2 py-0.5 rounded">
-            {typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue} {meta.unit}
-          </div>
-        </div>
+        )}
       </Card>
     );
   };

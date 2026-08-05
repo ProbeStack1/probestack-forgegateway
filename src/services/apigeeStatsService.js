@@ -87,6 +87,42 @@ export const fetchApigeeStats = async (token, environment, dimension, selectExpr
 };
 
 /**
+ * Same call as `fetchApigeeStats`, but keeps each point's timestamp and the response's
+ * `metaData.notices` instead of collapsing to bare numbers — used where the UI shows a
+ * detailed, human-readable breakdown (per-point table, totals, data source) rather than
+ * just a sparkline.
+ */
+export const fetchApigeeStatsDetailed = async (token, environment, dimension, selectExprs, timeRange, filterExpr) => {
+  const { start, end } = getTimeRangeTimestamps(timeRange);
+  const timeUnit = getTimeUnitForRange(timeRange);
+  let url =
+    `https://apigee.googleapis.com/v1/organizations/${APIGEE_ORG}/environments/${environment}/stats/${dimension}` +
+    `?select=${encodeURIComponent(selectExprs.join(','))}` +
+    `&timeRange=${encodeURIComponent(`${start}~${end}`)}` +
+    `&timeUnit=${timeUnit}`;
+  if (filterExpr) url += `&filter=${encodeURIComponent(filterExpr)}`;
+
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`Apigee stats API error: ${response.statusText}`);
+
+  const data = await response.json();
+  const dimensionEntry = data?.environments?.[0]?.dimensions?.[0];
+  const metricsArr = dimensionEntry?.metrics || data?.environments?.[0]?.metrics || [];
+  const notices = data?.metaData?.notices || [];
+
+  const series = {};
+  selectExprs.forEach((expr, idx) => {
+    const match = metricsArr.find((m) => m.name === expr) || metricsArr[idx];
+    const points = (match?.values || [])
+      .map((v) => ({ timestamp: Number(v.timestamp), value: parseFloat(v.value) || 0 }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    series[expr] = points;
+  });
+
+  return { series, notices, dimensionName: dimensionEntry?.name || null };
+};
+
+/**
  * Aggregate breakdown by dimension value (no timeUnit) — one row per value observed for
  * `dimension` (e.g. one row per status code, per proxy, per target host) with totals for
  * each entry in `selectExprs`.

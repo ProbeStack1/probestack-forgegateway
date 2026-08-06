@@ -26,6 +26,7 @@ import {
   fetchApigeeStats as fetchApigeeStatsShared,
   fetchApigeeStatsDetailed,
   getTimeUnitForRange,
+  getTimeRangeMs,
 } from '../services/apigeeStatsService';
 import '../index.css';
 
@@ -143,11 +144,48 @@ const formatMetricValue = (value, unit) => {
   return `${rounded.toLocaleString()}${unit ? ` ${unit}` : ''}`;
 };
 
-// --- Labeled Bar Chart: one bar per data point, with its exact value printed above the bar,
-// its timestamp printed below, a y-axis value scale on the left, and a hover tooltip (native
-// SVG <title>) giving the full date/time + value — so nothing on the chart is left unlabeled.
-// Bars scroll horizontally once there are more points than comfortably fit.
-const MetricBarChart = ({ points, color = '#ff5b1f', unit = '', emptyMessage, isExpanded = false }) => {
+// --- Catmull-Rom → cubic-Bézier smoothing, so the line reads as a soft curve instead of
+// jagged straight segments (the look every modern analytics dashboard — Vercel, Linear,
+// Stripe — uses for a time series). Falls back to a straight segment for 2 points.
+const buildSmoothPath = (coords) => {
+  if (coords.length === 0) return '';
+  if (coords.length === 1) return `M ${coords[0][0]},${coords[0][1]}`;
+  if (coords.length === 2) return `M ${coords[0][0]},${coords[0][1]} L ${coords[1][0]},${coords[1][1]}`;
+  let d = `M ${coords[0][0]},${coords[0][1]}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i === 0 ? 0 : i - 1];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2 < coords.length ? i + 2 : i + 1];
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2[0]},${p2[1]}`;
+  }
+  return d;
+};
+
+// --- Trend Chart: a smooth gradient-fill line with a tracking crosshair and a floating
+// tooltip card — the current standard for time-series analytics UI (Vercel Analytics,
+// Linear Insights, Stripe Dashboard). One point is always direct-labeled (the latest);
+// every other point's exact value/time surfaces on hover instead of being printed on the
+// chart, so the line stays clean at any density.
+const TrendChart = ({ points, color = '#ff5b1f', unit = '', label = '', emptyMessage, isExpanded = false }) => {
+  const containerRef = useRef(null);
+  const [width, setWidth] = useState(280);
+  const [hoverIndex, setHoverIndex] = useState(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const update = () => setWidth(el.clientWidth || 280);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (!points || points.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-center text-gray-500 text-xs px-4">
@@ -156,153 +194,109 @@ const MetricBarChart = ({ points, color = '#ff5b1f', unit = '', emptyMessage, is
     );
   }
 
+  const n = points.length;
   const values = points.map((p) => p.value);
-  const maxValue = Math.max(...values, 0);
-  const niceMax = maxValue === 0 ? 1 : maxValue;
-  const gridLevels = [1, 0.75, 0.5, 0.25, 0];
+  const rawMin = Math.min(...values);
+  const rawMax = Math.max(...values);
+  const range = rawMax - rawMin || Math.max(Math.abs(rawMax), 1) * 0.2;
+  const pad = range * 0.15;
+  const scaleMin = rawMin >= 0 ? Math.max(0, rawMin - pad) : rawMin - pad;
+  const scaleMax = rawMax + pad || 1;
+  const span = scaleMax - scaleMin || 1;
 
-  const barWidth = isExpanded ? 56 : 40;
-  const topMargin = 14; // room for the value label above the tallest bar
-  const plotHeight = isExpanded ? 190 : 96;
-  const bottomSpace = 34; // room for the rotated time label below each bar
-  const svgHeight = topMargin + plotHeight + bottomSpace;
-  const svgWidth = Math.max(points.length * barWidth, 200);
+  const topMargin = 18;
+  const bottomSpace = 20;
+  const plotHeight = isExpanded ? 210 : 92;
+  const height = topMargin + plotHeight + bottomSpace;
 
-  // Thin the x-axis time labels once there are too many bars to label every one legibly —
-  // the exact time is always still available via the hover tooltip on the bar itself.
-  const labelEvery = points.length <= 15 ? 1 : Math.ceil(points.length / 15);
+  const xAt = (i) => (n === 1 ? width / 2 : (i / (n - 1)) * width);
+  const yAt = (v) => topMargin + plotHeight * (1 - (v - scaleMin) / span);
+  const coords = points.map((p, i) => [xAt(i), yAt(p.value)]);
 
-  const formatBarValue = (v) => {
-    if (Math.abs(v) >= 1000) return `${Math.round(v / 100) / 10}k`;
-    return Number.isInteger(v) ? v : Math.round(v * 100) / 100;
+  const linePath = buildSmoothPath(coords);
+  const baselineY = topMargin + plotHeight;
+  const areaPath = `${linePath} L ${coords[n - 1][0]},${baselineY} L ${coords[0][0]},${baselineY} Z`;
+
+  const gridLevels = [1, 0.5, 0];
+  const gradId = `trend-grad-${color.replace('#', '')}`;
+
+  const handleMove = (e) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const fraction = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    setHoverIndex(n === 1 ? 0 : Math.round(fraction * (n - 1)));
   };
 
-  return (
-    <div className="w-full h-full flex">
-      {/* Fixed y-axis value scale */}
-      <div
-        className="flex flex-col justify-between text-right pr-2 text-[9px] text-gray-500 font-mono shrink-0"
-        style={{ height: svgHeight, paddingTop: topMargin, paddingBottom: bottomSpace }}
-      >
-        {gridLevels.map((lvl) => (
-          <span key={lvl}>{Math.round(niceMax * lvl).toLocaleString()}</span>
-        ))}
-      </div>
+  const hovered = hoverIndex !== null ? points[hoverIndex] : null;
+  const hoveredCoord = hoverIndex !== null ? coords[hoverIndex] : null;
+  const lastCoord = coords[n - 1];
 
-      {/* Scrollable plot area so every bar/value stays readable even with many points */}
-      <div className="flex-1 overflow-x-auto">
-        <svg width={svgWidth} height={svgHeight} className="block">
-          {gridLevels.map((lvl) => (
-            <line
-              key={lvl}
-              x1={0}
-              x2={svgWidth}
-              y1={topMargin + plotHeight * (1 - lvl)}
-              y2={topMargin + plotHeight * (1 - lvl)}
-              stroke="#2a3149"
-              strokeDasharray="3,3"
-              strokeWidth="1"
-            />
-          ))}
-          {points.map((p, i) => {
-            const barHeight = niceMax === 0 ? 0 : (p.value / niceMax) * plotHeight;
-            const x = i * barWidth + barWidth * 0.2;
-            const w = barWidth * 0.6;
-            const y = topMargin + (plotHeight - barHeight);
-            const labelX = x + w / 2;
-            return (
-              <g key={p.timestamp}>
-                <title>{`${formatFullDateTime(p.timestamp)}\n${formatMetricValue(p.value, unit)}`}</title>
-                <rect x={x} y={y} width={w} height={Math.max(barHeight, 1)} fill={color} rx="2" opacity="0.85" className="hover:opacity-100" />
-                <text x={labelX} y={Math.max(y - 4, topMargin - 4)} fontSize="9" fill="#cbd5e1" textAnchor="middle" className="font-mono">
-                  {formatBarValue(p.value)}
-                </text>
-                {i % labelEvery === 0 && (
-                  <text
-                    x={labelX}
-                    y={topMargin + plotHeight + 14}
-                    fontSize="9"
-                    fill="#6b7280"
-                    textAnchor="end"
-                    transform={`rotate(-45, ${labelX}, ${topMargin + plotHeight + 14})`}
-                  >
-                    {formatClockTime(p.timestamp)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-    </div>
-  );
-};
-
-// --- Mini Sparkline Chart Component (unchanged) ---
-const MiniChart = ({
-  data,
-  color = '#ff5b1f',
-  showLabels = true,
-  emptyMessage = 'No traffic recorded for this proxy in the selected window',
-}) => {
-  if (!data || data.length === 0) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-center text-gray-500 text-xs px-4">
-        {emptyMessage}
-      </div>
-    );
-  }
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const normalized = data.map((v) => ((v - min) / range) * 100);
-
-  const points = normalized
-    .map((v, i) => {
-      const x = (i / (normalized.length - 1)) * 100;
-      const y = 100 - v;
-      return `${x},${y}`;
-    })
-    .join(' ');
+  const tooltipWidthPx = 172;
+  const halfTooltip = tooltipWidthPx / 2 + 6;
+  const clampedLeft = hoveredCoord
+    ? Math.min(Math.max(hoveredCoord[0], halfTooltip), Math.max(width - halfTooltip, halfTooltip))
+    : 0;
 
   return (
-    <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
-      <defs>
-        <linearGradient id={`grad-${color}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.05" />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,100 ${points} 100,100`} fill={`url(#grad-${color})`} opacity="0.8" />
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {normalized.map((v, i) => (
-        <circle
-          key={i}
-          cx={(i / (normalized.length - 1)) * 100}
-          cy={100 - v}
-          r="2"
-          fill={color}
-          className="transition-opacity hover:opacity-100"
-        />
-      ))}
-      {showLabels && (
-        <>
-          <text x="5" y="15" fontSize="8" fill="#888" className="font-mono">
-            Max: {Math.round(max)}
-          </text>
-          <text x="5" y="95" fontSize="8" fill="#888" className="font-mono">
-            Min: {Math.round(min)}
-          </text>
-        </>
+    <div
+      ref={containerRef}
+      className="relative w-full h-full select-none cursor-crosshair"
+      onMouseMove={handleMove}
+      onMouseLeave={() => setHoverIndex(null)}
+    >
+      <svg width={width} height={height} className="block overflow-visible">
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {gridLevels.map((lvl) => {
+          const y = topMargin + plotHeight * (1 - lvl);
+          const val = scaleMin + span * lvl;
+          return (
+            <g key={lvl}>
+              <line x1={0} x2={width} y1={y} y2={y} stroke="#232a42" strokeWidth="1" />
+              <text x={2} y={y - 3} fontSize="9" fill="#5b6478" className="font-mono">
+                {Math.round(val).toLocaleString()}
+              </text>
+            </g>
+          );
+        })}
+
+        <path d={areaPath} fill={`url(#${gradId})`} stroke="none" />
+        <path d={linePath} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Direct label: only the latest point is ever labeled on the chart itself */}
+        <circle cx={lastCoord[0]} cy={lastCoord[1]} r="4" fill={color} stroke="#1a1f33" strokeWidth="2" />
+
+        <text x={2} y={height - 5} fontSize="9" fill="#5b6478">{formatClockTime(points[0].timestamp)}</text>
+        <text x={width - 2} y={height - 5} fontSize="9" fill="#5b6478" textAnchor="end">{formatClockTime(points[n - 1].timestamp)}</text>
+
+        {hoveredCoord && (
+          <>
+            <line x1={hoveredCoord[0]} x2={hoveredCoord[0]} y1={topMargin} y2={baselineY} stroke={color} strokeWidth="1" strokeDasharray="3,3" opacity="0.65" />
+            <circle cx={hoveredCoord[0]} cy={hoveredCoord[1]} r="4.5" fill={color} stroke="#1a1f33" strokeWidth="2" />
+          </>
+        )}
+      </svg>
+
+      {/* Floating tooltip card — every value a bare-hover reader needs, in one place */}
+      {hovered && (
+        <div
+          className="absolute top-0 pointer-events-none z-20 rounded-lg border border-dark-600 bg-[#0e172a]/95 backdrop-blur-sm shadow-xl px-3 py-2"
+          style={{ left: clampedLeft, width: tooltipWidthPx, transform: 'translateX(-50%)' }}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+            <span className="text-[10px] uppercase tracking-wide text-gray-500 truncate">{label}</span>
+          </div>
+          <div className="text-base font-bold text-white leading-none">{formatMetricValue(hovered.value, unit)}</div>
+          <div className="text-[10px] text-gray-500 mt-1">{formatFullDateTime(hovered.timestamp)}</div>
+        </div>
       )}
-    </svg>
+    </div>
   );
 };
 
@@ -521,6 +515,16 @@ export default function ProxyMonitoring({ showHeader = true }) {
     const peak = data.length ? Math.max(...data) : 0;
     const minVal = data.length ? Math.min(...data) : 0;
 
+    // Canned/derived graphs (Error Rate, Cache Hit, Throughput, ...) combine multiple
+    // Apigee selects client-side and only carry bare values — reconstruct each bucket's
+    // approximate timestamp by spreading them evenly across the selected time window so
+    // the chart's hover tooltip can still show a real time, not just an index.
+    const { startMs, endMs } = getTimeRangeMs(timeRange);
+    const points = data.map((value, i) => ({
+      timestamp: data.length === 1 ? endMs : startMs + (i / (data.length - 1)) * (endMs - startMs),
+      value,
+    }));
+
     return (
       <Card
         className={cn(
@@ -548,32 +552,23 @@ export default function ProxyMonitoring({ showHeader = true }) {
         </div>
 
         <div className={cn('w-full rounded-lg border border-dark-600 bg-[#1a1f33] relative p-2 transition-all', isExpanded ? 'h-80' : 'h-44')}>
-          <div className="absolute inset-0 flex flex-col justify-between px-2 py-3 pointer-events-none">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="w-full border-t border-dark-700/40 border-dashed h-0" />
-            ))}
-          </div>
-          <div className={cn('absolute inset-4', isExpanded && 'inset-8')}>
-            {isLoading ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <Loader2 className="w-6 h-6 text-primary animate-spin" />
-              </div>
-            ) : hasError ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-red-400 text-xs">
-                <AlertCircle className="w-5 h-5 mb-1" />
-                <span>Failed to load</span>
-              </div>
-            ) : (
-              <MiniChart data={data} color={color} showLabels={isExpanded} emptyMessage={emptyMessage} />
-            )}
-          </div>
-          <div className="absolute bottom-2 left-0 right-0 flex justify-between px-4 text-[10px] text-gray-500">
-            <span>{timeRange === '1 hour' ? '00:00' : timeRange === '6 hours' ? '06:00' : '12:00'}</span>
-            <span>Now</span>
-          </div>
-          <div className="absolute top-2 right-3 text-xs text-gray-300 bg-[#1a1f33]/80 px-2 py-0.5 rounded">
-            {typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue} {unit}
-          </div>
+          {isLoading ? (
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            </div>
+          ) : hasError ? (
+            <div className="w-full h-full flex flex-col items-center justify-center text-red-400 text-xs">
+              <AlertCircle className="w-5 h-5 mb-1" />
+              <span>Failed to load</span>
+            </div>
+          ) : (
+            <TrendChart points={points} color={color} unit={unit} label={title} emptyMessage={emptyMessage} isExpanded={isExpanded} />
+          )}
+          {!isLoading && !hasError && data.length > 0 && (
+            <div className="absolute top-2 right-3 text-xs text-gray-300 bg-[#1a1f33]/80 px-2 py-0.5 rounded pointer-events-none">
+              {typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue} {unit}
+            </div>
+          )}
           {isExpanded && !isLoading && !hasError && data.length > 0 && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[#1a1f33]/90 px-3 py-1 rounded text-xs text-gray-400 border border-dark-600">
               Showing {data.length} data points • Updated {new Date(refreshTimestamp).toLocaleTimeString()}
@@ -711,12 +706,12 @@ export default function ProxyMonitoring({ showHeader = true }) {
               <span>Failed to load</span>
             </div>
           ) : (
-            <MetricBarChart points={points} color={meta.color} unit={meta.unit} emptyMessage={emptyMessage} isExpanded={isExpanded} />
+            <TrendChart points={points} color={meta.color} unit={meta.unit} label={meta.label} emptyMessage={emptyMessage} isExpanded={isExpanded} />
           )}
         </div>
         {points.length > 0 && (
           <p className="text-[10px] text-gray-500 mt-1">
-            Hover a bar for its exact timestamp and value • range {formatClockTime(firstTs)} – {formatClockTime(lastTs)}
+            Hover the chart to inspect any point • range {formatClockTime(firstTs)} – {formatClockTime(lastTs)}
           </p>
         )}
 

@@ -50,6 +50,15 @@ export const getTimeUnitForRange = (timeRange) => {
   return hours <= 6 ? 'minute' : 'hour';
 };
 
+// Raw epoch-ms bounds for a `timeRange` — for UI code that needs to reconstruct approximate
+// per-bucket timestamps on responses that only return bare values (e.g. the canned/derived
+// graphs, which combine multiple selects client-side and so don't carry Apigee's own buckets).
+export const getTimeRangeMs = (timeRange) => {
+  const end = Date.now() - 60 * 1000;
+  const hours = RANGE_HOURS[timeRange] ?? 24;
+  return { startMs: end - hours * 60 * 60 * 1000, endMs: end };
+};
+
 // --- Extract a metric's numeric time series from an Apigee stats response ---
 // Real response shape: { environments: [{ dimensions: [{ metrics: [{ name, values: [{timestamp, value}] }] }] }] }
 export const getMetricSeries = (metricsArr, expectedName, indexFallback = 0) => {

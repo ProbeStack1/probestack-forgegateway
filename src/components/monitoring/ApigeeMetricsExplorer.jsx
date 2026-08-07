@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { AlertCircle, AlertTriangle, ChevronDown, Check, Loader2, Maximize2 } from 'lucide-react';
-import { Card } from '../ui/card';
+import { AlertTriangle, ChevronDown, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { fetchApigeeToken, fetchApigeeStats } from '../../services/apigeeStatsService';
+import { fetchApigeeToken, fetchApigeeStatsDetailed } from '../../services/apigeeStatsService';
+import MetricChartWidget from './MetricChartWidget';
 
 // --- Available Apigee stats dimensions (single-select) — same list as API Monitoring ---
 export const dimensionOptions = [
@@ -52,40 +52,6 @@ const ChartPlaceholder = ({ emptyMessage }) => (
     </div>
   </div>
 );
-
-// Empty-state for a chart that's already nested inside a bordered card (MetricChartWidget below) —
-// fills the parent box rather than drawing another bordered box on top of it.
-const MiniChartEmpty = ({ emptyMessage }) => (
-  <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-500 px-4 text-center">
-    <AlertTriangle className="h-4 w-4 opacity-50" />
-    <span className="text-xs">{emptyMessage}</span>
-  </div>
-);
-
-const MiniChart = ({ data, color = '#ff5b1f', emptyMessage }) => {
-  if (!data || data.length === 0) return <MiniChartEmpty emptyMessage={emptyMessage} />;
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const normalized = data.map((v) => ((v - min) / range) * 100);
-  const points = normalized
-    .map((v, i) => `${(i / (normalized.length - 1 || 1)) * 100},${100 - v}`)
-    .join(' ');
-  return (
-    <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible">
-      <defs>
-        <linearGradient id={`explorer-grad-${color}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.05" />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,100 ${points} 100,100`} fill={`url(#explorer-grad-${color})`} opacity="0.8" />
-      <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <text x="5" y="15" fontSize="8" fill="#888" className="font-mono">Max: {Math.round(max)}</text>
-      <text x="5" y="95" fontSize="8" fill="#888" className="font-mono">Min: {Math.round(min)}</text>
-    </svg>
-  );
-};
 
 /**
  * Dimension + Metric controls — the breakdown-dimension select and multi-select metric
@@ -184,6 +150,7 @@ export default function ApigeeMetricsExplorer({
   selectedMetrics,
 }) {
   const [metricData, setMetricData] = useState({});
+  const [metricNotices, setMetricNotices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [expandedWidget, setExpandedWidget] = useState(null);
@@ -191,18 +158,16 @@ export default function ApigeeMetricsExplorer({
   const refresh = useCallback(async () => {
     if (!filterReady || selectedMetrics.length === 0) {
       setMetricData({});
+      setMetricNotices([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const token = await fetchApigeeToken();
-      const seriesArr = await fetchApigeeStats(token, environment, dimension, selectedMetrics, timeRange, filterExpr);
-      const next = {};
-      selectedMetrics.forEach((metricExpr, idx) => {
-        next[metricExpr] = seriesArr[idx] || [];
-      });
-      setMetricData(next);
+      const { series, notices } = await fetchApigeeStatsDetailed(token, environment, dimension, selectedMetrics, timeRange, filterExpr);
+      setMetricData(series || {});
+      setMetricNotices(notices || []);
     } catch (err) {
       console.error('Failed to fetch Apigee metrics:', err);
       setError(err.message);
@@ -237,45 +202,23 @@ export default function ApigeeMetricsExplorer({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {selectedMetrics.map((metricExpr) => {
               const meta = metricMeta[metricExpr];
-              const data = metricData[metricExpr] || [];
-              const isLoading = loading && !metricData[metricExpr];
+              const points = metricData[metricExpr] || [];
               const isExpanded = expandedWidget === metricExpr;
-              const currentValue = data.length > 0 ? data[data.length - 1] : 0;
-              const emptyMessage = `No ${meta.label.toLowerCase()} data recorded (grouped by ${dimension}) in the selected window`;
 
               return (
-                <Card
+                <MetricChartWidget
                   key={metricExpr}
-                  className={cn(
-                    'bg-[#15192b] border-dark-700 p-4 shadow-sm hover:border-primary/30 transition-all',
-                    isExpanded && 'col-span-1 md:col-span-2 xl:col-span-3',
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h3 className="text-base font-medium text-white">{meta.label}</h3>
-                      <p className="text-[11px] text-gray-500 font-mono">{metricExpr}</p>
-                    </div>
-                    <button onClick={() => toggleExpand(metricExpr)} className="p-1.5 rounded hover:bg-dark-800/80 text-gray-400 hover:text-white">
-                      <Maximize2 className={cn('w-4 h-4', isExpanded && 'text-primary')} />
-                    </button>
-                  </div>
-
-                  <div className={cn('w-full rounded-lg border border-dark-600 bg-[#1a1f33] relative p-2 transition-all', isExpanded ? 'h-80' : 'h-44')}>
-                    <div className="absolute inset-4">
-                      {isLoading ? (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                        </div>
-                      ) : (
-                        <MiniChart data={data} color={meta.color} emptyMessage={emptyMessage} />
-                      )}
-                    </div>
-                    <div className="absolute top-2 right-3 text-xs text-gray-300 bg-[#1a1f33]/80 px-2 py-0.5 rounded">
-                      {typeof currentValue === 'number' ? currentValue.toFixed(1) : currentValue} {meta.unit}
-                    </div>
-                  </div>
-                </Card>
+                  metricExpr={metricExpr}
+                  meta={meta}
+                  points={points}
+                  notices={metricNotices}
+                  dimension={dimension}
+                  timeRange={timeRange}
+                  isExpanded={isExpanded}
+                  onToggleExpand={() => toggleExpand(metricExpr)}
+                  loading={loading && !metricData[metricExpr]}
+                  error={error && !metricData[metricExpr] ? error : null}
+                />
               );
             })}
           </div>

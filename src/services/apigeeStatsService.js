@@ -71,6 +71,59 @@ export const getMetricSeries = (metricsArr, expectedName, indexFallback = 0) => 
 export const sumSeries = (arr) => (Array.isArray(arr) ? arr.reduce((a, b) => a + b, 0) : 0);
 export const avgSeries = (arr) => (Array.isArray(arr) && arr.length ? sumSeries(arr) / arr.length : 0);
 
+// --- Apigee's stats endpoint enforces a strict per-project quota (UAPStatsCallsPerMinutePerProject,
+// commonly 100 req/min, shared across every tab/user hitting this org) — and the UI can easily fire
+// many of these at once (several proxies × several graphs on first load). All stats calls below go
+// through a small concurrency queue, plus retry-with-backoff on 429, instead of firing unbounded in
+// parallel and surfacing a raw quota error to the user.
+const STATS_MAX_CONCURRENT = 4;
+const STATS_MAX_RETRIES = 3;
+let statsActiveCount = 0;
+const statsQueue = [];
+
+const runNextInStatsQueue = () => {
+  if (statsActiveCount >= STATS_MAX_CONCURRENT || statsQueue.length === 0) return;
+  statsActiveCount += 1;
+  const { task, resolve, reject } = statsQueue.shift();
+  task()
+    .then(resolve, reject)
+    .finally(() => {
+      statsActiveCount -= 1;
+      runNextInStatsQueue();
+    });
+};
+
+const enqueueStatsRequest = (task) =>
+  new Promise((resolve, reject) => {
+    statsQueue.push({ task, resolve, reject });
+    runNextInStatsQueue();
+  });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// --- Runs one stats fetch through the concurrency queue, retrying on 429 with backoff
+// (honoring Retry-After when Apigee sends one) before giving up ---
+const fetchStatsJson = async (url, token) =>
+  enqueueStatsRequest(async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (response.status !== 429 || attempt >= STATS_MAX_RETRIES) {
+        if (!response.ok) {
+          if (response.status === 429) {
+            throw new Error('Apigee stats API rate limit exceeded — please wait a moment and try again');
+          }
+          throw new Error(`Apigee stats API error: ${response.statusText}`);
+        }
+        return response.json();
+      }
+      const retryAfterSeconds = Number(response.headers.get('Retry-After'));
+      const backoffMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : 1000 * 2 ** attempt + Math.random() * 300;
+      await sleep(backoffMs);
+    }
+  });
+
 /**
  * Time-series stats for a single dimension value (e.g. one proxy) — used for sparkline graphs.
  * Returns one numeric array per entry in `selectExprs`, aligned to the same time buckets.
@@ -85,10 +138,7 @@ export const fetchApigeeStats = async (token, environment, dimension, selectExpr
     `&timeUnit=${timeUnit}`;
   if (filterExpr) url += `&filter=${encodeURIComponent(filterExpr)}`;
 
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) throw new Error(`Apigee stats API error: ${response.statusText}`);
-
-  const data = await response.json();
+  const data = await fetchStatsJson(url, token);
   const metricsArr =
     data?.environments?.[0]?.dimensions?.[0]?.metrics || data?.environments?.[0]?.metrics || [];
 
@@ -111,10 +161,7 @@ export const fetchApigeeStatsDetailed = async (token, environment, dimension, se
     `&timeUnit=${timeUnit}`;
   if (filterExpr) url += `&filter=${encodeURIComponent(filterExpr)}`;
 
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) throw new Error(`Apigee stats API error: ${response.statusText}`);
-
-  const data = await response.json();
+  const data = await fetchStatsJson(url, token);
   const dimensionEntry = data?.environments?.[0]?.dimensions?.[0];
   const metricsArr = dimensionEntry?.metrics || data?.environments?.[0]?.metrics || [];
   const notices = data?.metaData?.notices || [];
@@ -144,10 +191,7 @@ export const fetchApigeeBreakdown = async (token, environment, dimension, select
     `&timeRange=${encodeURIComponent(`${start}~${end}`)}`;
   if (filterExpr) url += `&filter=${encodeURIComponent(filterExpr)}`;
 
-  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) throw new Error(`Apigee stats API error: ${response.statusText}`);
-
-  const data = await response.json();
+  const data = await fetchStatsJson(url, token);
   const dims = data?.environments?.[0]?.dimensions || [];
 
   return dims.map((d) => {

@@ -3,18 +3,28 @@ import { Target, ChevronDown, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { fetchApigeeToken, fetchApigeeBreakdown } from '../services/apigeeStatsService';
 import ApigeeMetricsExplorer, { ApigeeMetricsControls } from '../components/monitoring/ApigeeMetricsExplorer';
+import { MultiSelectFilterDropdown, FilterTabs, MAX_SELECTED_OPTIONS } from '../components/monitoring/MultiSelectFilterTabs';
 import '../index.css';
 
 const timeRangeOptions = ['1 hour', '3 hours', '6 hours', '12 hours', '1 day', '3 days', '7 days', '14 days'];
 
 export default function TargetPerformance() {
   const [environment, setEnvironment] = useState('dev');
-  const [targetIp, setTargetIp] = useState('');
+  const [selectedTargets, setSelectedTargets] = useState([]);
+  const [activeTargetTab, setActiveTargetTab] = useState(null);
   const [timeRange, setTimeRange] = useState('1 day');
 
   const [targetHosts, setTargetHosts] = useState([]);
   const [loadingTargets, setLoadingTargets] = useState(false);
   const [targetsError, setTargetsError] = useState(null);
+
+  const toggleTarget = (host) => {
+    setSelectedTargets((prev) => {
+      if (prev.includes(host)) return prev.filter((h) => h !== host);
+      if (prev.length >= MAX_SELECTED_OPTIONS) return prev;
+      return [...prev, host];
+    });
+  };
 
   const [dimension, setDimension] = useState('target_host');
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -43,6 +53,14 @@ export default function TargetPerformance() {
   useEffect(() => {
     fetchTargetHosts();
   }, [fetchTargetHosts]);
+
+  // --- Keep the active target-host tab valid as the selection changes ---
+  useEffect(() => {
+    setActiveTargetTab((prev) => {
+      if (selectedTargets.length === 0) return null;
+      return prev && selectedTargets.includes(prev) ? prev : selectedTargets[0];
+    });
+  }, [selectedTargets]);
 
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: '#0e172a' }}>
@@ -77,37 +95,21 @@ export default function TargetPerformance() {
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
             </div>
 
-            {/* Target host — populated from traffic actually seen */}
-            <div className="relative min-w-[200px]">
-              <label className="absolute -top-2.5 left-2.5 px-1 text-[10px] font-medium text-gray-500 bg-[#0e172a] z-10">
-                Target Host
-              </label>
-              {loadingTargets ? (
-                <div className="w-full h-9 flex items-center justify-center rounded-md border border-dark-700 bg-[#1a1f33] text-gray-400">
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                  <span className="text-xs">Loading...</span>
-                </div>
-              ) : targetsError ? (
-                <div className="w-full h-9 flex items-center justify-between px-3 rounded-md border border-red-500/50 bg-[#1a1f33] text-red-400 text-xs">
-                  <span>Error loading targets</span>
-                  <button onClick={fetchTargetHosts} className="ml-2 underline">Retry</button>
-                </div>
-              ) : (
-                <>
-                  <select
-                    value={targetIp}
-                    onChange={(e) => setTargetIp(e.target.value)}
-                    className="w-full h-9 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
-                  >
-                    <option value="">Select a target</option>
-                    {targetHosts.map((host) => (
-                      <option key={host} value={host}>{host}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                </>
-              )}
-            </div>
+            {/* Target Host Multi-select — populated from traffic actually seen; up to MAX_SELECTED_OPTIONS */}
+            <MultiSelectFilterDropdown
+              label="Target Host"
+              items={targetHosts}
+              getItemLabel={(host) => host}
+              getItemKey={(host) => host}
+              selected={selectedTargets}
+              onToggle={toggleTarget}
+              loading={loadingTargets}
+              error={targetsError}
+              onRetry={fetchTargetHosts}
+              placeholderLabel="Select targets"
+              errorLabel="Error loading targets"
+              minWidthClass="min-w-[200px]"
+            />
 
             {/* Dimension + Metric — moved up right after Target Host */}
             <ApigeeMetricsControls
@@ -136,12 +138,23 @@ export default function TargetPerformance() {
             ))}
           </div>
 
+          {/* Target Host Tabs — each selected host gets its own tab; the explorer below renders that host's graphs only */}
+          {selectedTargets.length > 0 && (
+            <FilterTabs
+              items={selectedTargets}
+              activeItem={activeTargetTab}
+              onSelect={setActiveTargetTab}
+              icon={Target}
+              badgeCount={selectedMetrics.length}
+            />
+          )}
+
           {/* Dimension/Metric-driven explorer — same mechanic as API Monitoring */}
           <ApigeeMetricsExplorer
             environment={environment}
             timeRange={timeRange}
-            filterExpr={targetIp ? `target_host eq '${targetIp}'` : undefined}
-            filterReady={Boolean(targetIp)}
+            filterExpr={activeTargetTab ? `target_host eq '${activeTargetTab}'` : undefined}
+            filterReady={Boolean(activeTargetTab)}
             emptyFilterMessage="Select a target host to view its performance metrics"
             dimension={dimension}
             selectedMetrics={selectedMetrics}

@@ -3,6 +3,7 @@ import { Clock, ChevronDown, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { fetchApigeeToken, fetchApigeeProxies } from '../services/apigeeStatsService';
 import ApigeeMetricsExplorer, { ApigeeMetricsControls } from '../components/monitoring/ApigeeMetricsExplorer';
+import { MultiSelectFilterDropdown, FilterTabs, MAX_SELECTED_OPTIONS } from '../components/monitoring/MultiSelectFilterTabs';
 import '../index.css';
 
 const timeRangeOptions = ['1 hour', '3 hours', '6 hours', '12 hours', '1 day', '3 days', '7 days', '14 days'];
@@ -16,13 +17,22 @@ const regionOptions = [
 
 export default function LatencyAnalysis() {
   const [environment, setEnvironment] = useState('dev');
-  const [proxy, setProxy] = useState('');
+  const [selectedProxies, setSelectedProxies] = useState([]);
+  const [activeProxyTab, setActiveProxyTab] = useState(null);
   const [region, setRegion] = useState('north-america');
   const [timeRange, setTimeRange] = useState('1 day');
 
   const [apiProxies, setApiProxies] = useState([]);
   const [loadingProxies, setLoadingProxies] = useState(false);
   const [proxiesError, setProxiesError] = useState(null);
+
+  const toggleProxy = (proxyName) => {
+    setSelectedProxies((prev) => {
+      if (prev.includes(proxyName)) return prev.filter((p) => p !== proxyName);
+      if (prev.length >= MAX_SELECTED_OPTIONS) return prev;
+      return [...prev, proxyName];
+    });
+  };
 
   const [dimension, setDimension] = useState('apiproxy');
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -51,6 +61,14 @@ export default function LatencyAnalysis() {
   useEffect(() => {
     fetchProxies();
   }, [fetchProxies]);
+
+  // --- Keep the active proxy tab valid as the proxy selection changes ---
+  useEffect(() => {
+    setActiveProxyTab((prev) => {
+      if (selectedProxies.length === 0) return null;
+      return prev && selectedProxies.includes(prev) ? prev : selectedProxies[0];
+    });
+  }, [selectedProxies]);
 
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: '#0e172a' }}>
@@ -85,37 +103,19 @@ export default function LatencyAnalysis() {
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
             </div>
 
-            {/* Proxy Dropdown — real-time list, same source as API Monitoring */}
-            <div className="relative min-w-[160px]">
-              <label className="absolute -top-2.5 left-2.5 px-1 text-[10px] font-medium text-gray-500 bg-[#0e172a] z-10">
-                Proxy
-              </label>
-              {loadingProxies ? (
-                <div className="w-full h-9 flex items-center justify-center rounded-md border border-dark-700 bg-[#1a1f33] text-gray-400">
-                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
-                  <span className="text-xs">Loading...</span>
-                </div>
-              ) : proxiesError ? (
-                <div className="w-full h-9 flex items-center justify-between px-3 rounded-md border border-red-500/50 bg-[#1a1f33] text-red-400 text-xs">
-                  <span>Error loading proxies</span>
-                  <button onClick={fetchProxies} className="ml-2 underline">Retry</button>
-                </div>
-              ) : (
-                <>
-                  <select
-                    value={proxy}
-                    onChange={(e) => setProxy(e.target.value)}
-                    className="w-full h-9 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
-                  >
-                    <option value="">Select a proxy</option>
-                    {apiProxies.map((p) => (
-                      <option key={p.name} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                </>
-              )}
-            </div>
+            {/* Proxy Multi-select — real-time list, same source as API Monitoring; up to MAX_SELECTED_OPTIONS */}
+            <MultiSelectFilterDropdown
+              label="Proxy"
+              items={apiProxies}
+              getItemLabel={(p) => p.name}
+              getItemKey={(p) => p.name}
+              selected={selectedProxies}
+              onToggle={toggleProxy}
+              loading={loadingProxies}
+              error={proxiesError}
+              onRetry={fetchProxies}
+              placeholderLabel="Select proxies"
+            />
 
             {/* Dimension + Metric — moved up right after Proxy */}
             <ApigeeMetricsControls
@@ -160,12 +160,23 @@ export default function LatencyAnalysis() {
             ))}
           </div>
 
+          {/* Proxy Tabs — each selected proxy gets its own tab; the explorer below renders that proxy's graphs only */}
+          {selectedProxies.length > 0 && (
+            <FilterTabs
+              items={selectedProxies}
+              activeItem={activeProxyTab}
+              onSelect={setActiveProxyTab}
+              icon={Clock}
+              badgeCount={selectedMetrics.length}
+            />
+          )}
+
           {/* Dimension/Metric-driven explorer — same mechanic as API Monitoring */}
           <ApigeeMetricsExplorer
             environment={environment}
             timeRange={timeRange}
-            filterExpr={proxy ? `apiproxy eq '${proxy}'` : undefined}
-            filterReady={Boolean(proxy)}
+            filterExpr={activeProxyTab ? `apiproxy eq '${activeProxyTab}'` : undefined}
+            filterReady={Boolean(activeProxyTab)}
             emptyFilterMessage="Select a proxy to view latency data"
             dimension={dimension}
             selectedMetrics={selectedMetrics}

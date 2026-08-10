@@ -13,6 +13,8 @@ const readCookie = (name) => {
 
 export const isAuthenticated = () => Boolean(readCookie(AUTH_COOKIE_NAME));
 
+export const getAuthToken = () => readCookie(AUTH_COOKIE_NAME);
+
 export const getLoginRedirectUrl = () => {
   const loginUrl = new URL(PROBESTACK_LOGIN_URL);
   loginUrl.searchParams.set('returnTo', window.location.href);

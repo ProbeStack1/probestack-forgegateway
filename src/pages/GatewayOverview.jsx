@@ -35,6 +35,8 @@ import {
   Database,
   Target,
   BarChart2,
+  KeyRound,
+  FolderTree,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { fetchApigeeToken } from "../services/apigeeToken";
@@ -71,10 +73,24 @@ import GatewayAuditLogs from "./Gateway/GatewayAuditLogs";
 import { SharedFlowDetailView } from "./Gateway/SharedFlowDetailView";
 import GovernanceTabsPage from "./Gateway/GovernanceTabsPage";
 
+// New AI Gateway-style Onboarding pages (replaces the legacy /onboarding page)
+import OrganizationsIndex from "./Onboarding/OrganizationsIndex";
+import OrganizationDetail from "./Onboarding/OrganizationDetail";
+import ProjectDetail from "./Onboarding/ProjectDetail";
+import ApplicationDetail from "./Onboarding/ApplicationDetail";
+import AccessCenter from "./Onboarding/AccessCenter";
+
+// Feature flag — set to true to re-enable the legacy onboarding page at /onboarding.
+// Old files are kept around because APIDeploy/APITest/FsGatewayProxyGeneration/etc.
+// still import `onboardingService` and `OnboardingModal` for the proxy-generation flow.
+// Flip this flag to roll back the routing only.
+const ENABLE_LEGACY_ONBOARDING = false;
+
 // ====================== Menu Path Helpers ======================
 const GATEWAY_MENU_PATHS = {
   "gateway-dashboard": "dashboard",
   "gateway-onboarding": "onboarding",
+  "gateway-access-center": "access-center",
   "api-proxies": "proxy",
   "shared-flows": "shared-flow",
   "api-products": "products",
@@ -213,6 +229,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
   const [hovering, setHovering] = useState(false);
   const [suppressHover, setSuppressHover] = useState(false);
   const [sectionsExpanded, setSectionsExpanded] = useState({
+    onboarding: true,
     proxyDev: true,
     distribution: true,
     analytics: true,
@@ -319,15 +336,6 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
           {/* Primary Items */}
           <div className="space-y-1">
             <div
-              className={sidebarItemClass(selectedMenuItem === "gateway-onboarding")}
-              onClick={() => selectSidebarMenu("gateway-onboarding")}
-            >
-              <FileText
-                className={sidebarIconClass(selectedMenuItem === "gateway-onboarding", "text-[#ff8a5c]")}
-              />
-              {!sidebarCollapsed && <span>Onboarding</span>}
-            </div>
-            <div
               className={sidebarItemClass(selectedMenuItem === "gateway-dashboard")}
               onClick={() => selectSidebarMenu("gateway-dashboard")}
             >
@@ -336,6 +344,38 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
               />
               {!sidebarCollapsed && <span>Dashboard</span>}
             </div>
+          </div>
+
+          {/* Onboarding Section */}
+          <div>
+            <div className={sectionHeaderClass} onClick={() => toggleSection("onboarding")}>
+              {sectionsExpanded.onboarding ? (
+                <ChevronDown className="h-4 w-4 text-[#ff8a5c]" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-[#ff8a5c]" />
+              )}
+              {!sidebarCollapsed && (
+                <span className="text-xs font-semibold uppercase text-[#5a6a8a]">Onboarding</span>
+              )}
+            </div>
+            {sectionsExpanded.onboarding && (
+              <div className="space-y-1 mt-1">
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "gateway-onboarding")}
+                  onClick={() => selectSidebarMenu("gateway-onboarding")}
+                >
+                  <FolderTree className={sidebarIconClass(selectedMenuItem === "gateway-onboarding", "text-[#ff8a5c]")} />
+                  {!sidebarCollapsed && <span>Hierarchy</span>}
+                </div>
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "gateway-access-center")}
+                  onClick={() => selectSidebarMenu("gateway-access-center")}
+                >
+                  <KeyRound className={sidebarIconClass(selectedMenuItem === "gateway-access-center", "text-cyan-400")} />
+                  {!sidebarCollapsed && <span>Access Center</span>}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Proxy Development Section */}
@@ -631,7 +671,15 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
         <div className="min-h-0 flex-1 overflow-auto">
           <Routes>
             <Route path="dashboard" element={<GatewayDashboard />} />
-            <Route path="onboarding" element={<GatewayOnboarding showMessage={showMessage} />} />
+            {ENABLE_LEGACY_ONBOARDING && (
+              <Route path="onboarding" element={<GatewayOnboarding showMessage={showMessage} />} />
+            )}
+            {/* New AI Gateway-style Onboarding hierarchy */}
+            <Route path="onboarding" element={<OrganizationsIndex />} />
+            <Route path="onboarding/business-units/:buId" element={<OrganizationDetail />} />
+            <Route path="onboarding/projects/:projectId" element={<ProjectDetail />} />
+            <Route path="onboarding/applications/:appId" element={<ApplicationDetail />} />
+            <Route path="access-center" element={<AccessCenter />} />
             <Route path="proxy" element={<ProxiesView showMessage={showMessage} />} />
             <Route path="proxy/:proxyName" element={<ProxyDetailViewWrapper showMessage={showMessage} />} />
             <Route path="shared-flow" element={<SharedFlowsView showMessage={showMessage} />} />

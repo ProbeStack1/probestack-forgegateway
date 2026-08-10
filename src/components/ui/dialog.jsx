@@ -89,6 +89,11 @@ const DialogDescription = React.forwardRef(({ className, ...props }, ref) => (
 ));
 DialogDescription.displayName = "DialogDescription";
 
+const DialogBody = ({ className, ...props }) => (
+  <div className={cn("min-h-0 flex-1 overflow-y-auto px-6 py-4", className)} {...props} />
+);
+DialogBody.displayName = "DialogBody";
+
 const DialogFooter = ({ className, ...props }) => (
   <div
     className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 mt-4", className)}
@@ -103,5 +108,6 @@ export {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogBody,
   DialogFooter,
 };

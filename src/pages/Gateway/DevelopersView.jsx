@@ -100,6 +100,8 @@ export const DevelopersView = ({ showMessage }) => {
               appsCount: details.apps?.length || 0,
               createdAt: details.createdAt,
               lastModifiedAt: details.lastModifiedAt,
+              createdBy: details.audit?.registry?.createdBy,
+              updatedBy: details.audit?.registry?.updatedBy,
               apps: details.apps || [],
               audit: details.audit,
             };
@@ -563,16 +565,8 @@ export const DevelopersView = ({ showMessage }) => {
                 </div>
               )}
               <ResourceAuditDetails
-                audit={{
-                  ...selectedDeveloper.audit,
-                  registry: {
-                    ...selectedDeveloper.audit?.registry,
-                    createdAt: selectedDeveloper.audit?.registry?.createdAt || selectedDeveloper.createdAt,
-                    updatedAt: selectedDeveloper.audit?.registry?.updatedAt || selectedDeveloper.lastModifiedAt,
-                  },
-                }}
+                audit={selectedDeveloper.audit}
                 showSourceStatus={false}
-                showCreatorModifier={false}
                 showHistory={false}
               />
             </>

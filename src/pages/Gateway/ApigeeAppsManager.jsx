@@ -202,13 +202,10 @@ export default function ApigeeAppsManager({
     setAuditDetails({ name: appName, audit: null, resource: null });
     try {
       const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
-      const [auditRes, resourceRes] = await Promise.all([
-        apigeeApiFetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/DEVELOPER_APP/${encodeURIComponent(appName)}?developer=${encodeURIComponent(developerEmail)}`),
-        apigeeApiFetch(APIGEE_ENDPOINTS.APPS.GET(effectiveOrg, developerEmail, appName)),
-      ]);
-      if (!auditRes.ok) throw new Error(`Audit request failed: ${auditRes.status}`);
+      const resourceRes = await apigeeApiFetch(APIGEE_ENDPOINTS.APPS.GET(effectiveOrg, developerEmail, appName));
       if (!resourceRes.ok) throw new Error(`Consumer detail request failed: ${resourceRes.status}`);
-      setAuditDetails({ name: appName, audit: await auditRes.json(), resource: await resourceRes.json() });
+      const resource = await resourceRes.json();
+      setAuditDetails({ name: appName, audit: resource.audit, resource });
     } catch (error) {
       setAuditDetails({ name: appName, audit: { history: [], registry: null }, error: error.message });
     } finally { setAuditLoading(false); }

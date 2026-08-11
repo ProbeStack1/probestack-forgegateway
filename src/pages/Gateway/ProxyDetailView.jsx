@@ -2088,25 +2088,25 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Created At</span>
                                             <span className="text-sm text-slate-300">
-                                                {formatDate(proxyDetails.proxy?.metaData?.createdAt)}
+                                                {formatDate(proxyDetails.audit?.registry?.createdAt || proxyDetails.proxy?.metaData?.createdAt)}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Created By</span>
                                             <span className="text-sm text-slate-300">
-                                                {proxyDetails.proxy?.metaData?.createdBy || '—'}
+                                                {proxyDetails.audit?.registry?.createdBy || proxyDetails.proxy?.metaData?.createdBy || '—'}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Last Modified At</span>
                                             <span className="text-sm text-slate-300">
-                                                {formatDate(proxyDetails.proxy?.metaData?.lastModifiedAt)}
+                                                {formatDate(proxyDetails.audit?.registry?.updatedAt || proxyDetails.proxy?.metaData?.lastModifiedAt)}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Last Modified By</span>
                                             <span className="text-sm text-slate-300">
-                                                {proxyDetails.proxy?.metaData?.lastModifiedBy || '—'}
+                                                {proxyDetails.audit?.registry?.updatedBy || proxyDetails.proxy?.metaData?.lastModifiedBy || '—'}
                                             </span>
                                         </div>
                                     </div>
@@ -2565,7 +2565,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <h4 className="text-sm font-semibold text-white">Developer</h4>
                                         </div>
                                         <p className="text-sm text-slate-300">
-                                            {proxyDetails?.proxy?.metaData?.createdBy || proxyDetails?.proxy?.metaData?.lastModifiedBy || '—'}
+                                            {proxyDetails?.audit?.registry?.createdBy || proxyDetails?.audit?.registry?.updatedBy || proxyDetails?.proxy?.metaData?.createdBy || proxyDetails?.proxy?.metaData?.lastModifiedBy || '—'}
                                         </p>
                                     </div>
 

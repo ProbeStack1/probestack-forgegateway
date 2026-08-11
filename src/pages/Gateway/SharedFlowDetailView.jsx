@@ -236,19 +236,19 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400">Created At</span>
-                    <span className="text-sm text-slate-300">{formatDate(getMeta().createdAt)}</span>
+                    <span className="text-sm text-slate-300">{formatDate(sharedFlowDetails?.audit?.registry?.createdAt || getMeta().createdAt)}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400">Created By</span>
-                    <span className="text-sm text-slate-300">{getMeta().createdBy || "—"}</span>
+                    <span className="text-sm text-slate-300">{sharedFlowDetails?.audit?.registry?.createdBy || getMeta().createdBy || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400">Last Modified At</span>
-                    <span className="text-sm text-slate-300">{formatDate(getMeta().lastModifiedAt)}</span>
+                    <span className="text-sm text-slate-300">{formatDate(sharedFlowDetails?.audit?.registry?.updatedAt || getMeta().lastModifiedAt)}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400">Last Modified By</span>
-                    <span className="text-sm text-slate-300">{getMeta().lastModifiedBy || "—"}</span>
+                    <span className="text-sm text-slate-300">{sharedFlowDetails?.audit?.registry?.updatedBy || getMeta().lastModifiedBy || "—"}</span>
                   </div>
                 </div>
               </div>

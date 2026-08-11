@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/button";
 import { GatewayContextSelector } from "./GatewayContextSelector";
 import { fetchApigeeToken } from "../../services/apigeeToken";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 
 export const SharedFlowsView = ({ showMessage }) => {
@@ -106,7 +107,12 @@ export const SharedFlowsView = ({ showMessage }) => {
             return;
         }
         // TODO: Call your API to create the shared flow
-        // For now, mock success:
+        const actorContext = { onboardingId: selectedOrg || "gateway" };
+        await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(selectedOrg)}/config-audit/SHARED_FLOW/${encodeURIComponent(createModalOpen.name)}/record`, {
+            method: "POST",
+            headers: getTrackingHeaders(actorContext),
+            body: JSON.stringify({ operation: "CREATE", requestPayload: createModalOpen, afterSnapshot: createModalOpen }),
+        });
         showMessage(`Function "${createModalOpen.name}" created successfully!`, "success");
         setCreateModalOpen({ open: false, name: "", description: "" });
         fetchSharedFlows(); // refresh list

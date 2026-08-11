@@ -42,6 +42,7 @@ import { fetchApigeeToken } from "../../services/apigeeToken";
 import { useNavigate } from "react-router-dom";
 import ViewSpecModal from "../../components/ViewSpecModal";
 import API_BASE_URL from "../../config/apiConfig";
+import ResourceAuditDetails from './ResourceAuditDetails';
 
 export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete, onDevelop, onDebug, showMessage }) => {
     const [activeTab, setActiveTab] = useState('overview');
@@ -2209,6 +2210,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                     </div>
                                 </div> */}
                             </div>
+                            <ResourceAuditDetails audit={proxyDetails.audit} />
 
                             {/* ---- Deployments Section (Card style) ---- */}
                             <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">

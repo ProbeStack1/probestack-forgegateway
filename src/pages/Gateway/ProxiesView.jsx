@@ -12,7 +12,7 @@ import { GatewayContextSelector } from "./GatewayContextSelector";
 import JSZip from "jszip";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTargetServerModal";
-import { loadApigeeOnboardingOptions } from "../Apigee/components/apigeeTracking";
+import { getTrackingHeaders, loadApigeeOnboardingOptions } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
 
 export const ProxiesView = ({ showMessage }) => {
@@ -801,7 +801,11 @@ export const ProxiesView = ({ showMessage }) => {
 
             const formData = new FormData();
             formData.append("file", zipToUpload);
-            const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+            if (!defaultOnboardingId) {
+                showMessage("Select an onboarding context before creating an API so creator and modifier details can be tracked.", "error");
+                return;
+            }
             const uploadUrl = `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/apis?action=import&name=${encodeURIComponent(modal.name)}`;
             const response = await fetch(uploadUrl, {
                 method: "POST",
@@ -812,6 +816,13 @@ export const ProxiesView = ({ showMessage }) => {
                 const errorText = await response.text();
                 throw new Error(errorText || `Upload failed with status ${response.status}`);
             }
+
+            const createdApi = await response.clone().json().catch(() => ({ name: modal.name }));
+            await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
+                method: "POST",
+                headers: getTrackingHeaders({ onboardingId: defaultOnboardingId, microserviceId: defaultMicroserviceId }),
+                body: JSON.stringify({ operation: "CREATE", requestPayload: { name: modal.name }, afterSnapshot: createdApi, responsePayload: createdApi }),
+            });
 
             showMessage(`API "${modal.name}" created successfully!`, "success");
             if (selectedProducts.length > 0) {

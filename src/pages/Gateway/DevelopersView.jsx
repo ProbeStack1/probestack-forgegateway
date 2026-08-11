@@ -8,6 +8,8 @@ import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent } from "../../components/ui/dialog";
 import { fetchApigeeToken } from "../../services/apigeeToken";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
+import ResourceAuditDetails from './ResourceAuditDetails';
 
 export const DevelopersView = ({ showMessage }) => {
   const [developers, setDevelopers] = useState([]);
@@ -98,6 +100,7 @@ export const DevelopersView = ({ showMessage }) => {
               appsCount: details.apps?.length || 0,
               createdAt: details.createdAt || details.createdAt,
               apps: details.apps || [],
+              audit: details.audit,
             };
           }
           return {
@@ -193,7 +196,7 @@ export const DevelopersView = ({ showMessage }) => {
         `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },
           body: JSON.stringify(payload),
         }
       );
@@ -228,7 +231,7 @@ export const DevelopersView = ({ showMessage }) => {
         `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
         {
           method: "PUT",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },
           body: JSON.stringify(payload),
         }
       );
@@ -255,7 +258,7 @@ export const DevelopersView = ({ showMessage }) => {
         `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },
         }
       );
       if (!response.ok) {
@@ -553,6 +556,7 @@ export const DevelopersView = ({ showMessage }) => {
                   </div>
                 </div>
               )}
+              <ResourceAuditDetails audit={selectedDeveloper.audit} />
             </>
           )}
         </div>

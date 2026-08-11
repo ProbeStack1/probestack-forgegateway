@@ -9,6 +9,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { fetchApigeeToken } from "../../services/apigeeToken";
+import ResourceAuditDetails from './ResourceAuditDetails';
 
 export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
   const navigate = useNavigate();
@@ -307,6 +308,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                 </div>
               </div>
             </div>
+            <ResourceAuditDetails audit={sharedFlowDetails?.audit} />
 
             {/* Revisions Section – matches ProxyDetailView exactly */}
             <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">

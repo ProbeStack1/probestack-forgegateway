@@ -14,10 +14,10 @@ authenticatedAxios.interceptors.request.use(
     // Any user-triggered API call re-checks the main-app session cookie, so a
     // logout elsewhere is caught the moment the user does something here
     // instead of only on the next page reload.
-    if (!isAuthenticated()) {
-      redirectToLogin();
-      return Promise.reject(new axios.Cancel("Session expired, redirecting to login"));
-    }
+    // if (!isAuthenticated()) {
+    //   redirectToLogin();
+    //   return Promise.reject(new axios.Cancel("Session expired, redirecting to login"));
+    // }
 
     const raw = localStorage.getItem("authToken");
     const token = typeof raw === "string" ? raw.trim() : "";

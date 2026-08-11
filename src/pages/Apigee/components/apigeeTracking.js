@@ -123,9 +123,7 @@ export const getTrackingHeaders = ({ onboardingId, microserviceId } = {}) => {
   }
 
   const createdBy = getCurrentUserEmail();
-  if (createdBy) {
-    headers["x-created-by"] = createdBy;
-  }
+  headers["x-created-by"] = createdBy || "unknown-user";
 
   return headers;
 };

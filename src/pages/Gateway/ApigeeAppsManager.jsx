@@ -10,6 +10,7 @@ import {
   ArrowUp,
   AlertTriangle,
   Key,
+  Eye,
 } from "lucide-react";
 import { apigeeApiFetch } from "../../services/apigeeApiService";
 import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
@@ -20,6 +21,8 @@ import { TableSkeletonRows } from "../../components/ui/SkeletonLoader";
 import useApigeeDevelopers from "../../pages/Apigee/components/useApigeeDevelopers";
 import { GatewayContextSelector } from "./GatewayContextSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import ResourceAuditDetails from './ResourceAuditDetails';
+import { getTrackingHeaders } from '../Apigee/components/apigeeTracking';
 
 export default function ApigeeAppsManager({
   orgId: externalOrgId,
@@ -45,6 +48,8 @@ export default function ApigeeAppsManager({
   const [isAppCredentialsModalOpen, setIsAppCredentialsModalOpen] = useState(false);
   const [isFetchingAppDetails, setIsFetchingAppDetails] = useState(false);
   const [appDetailsError, setAppDetailsError] = useState("");
+  const [auditDetails, setAuditDetails] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [isAppSyncModal, setIsAppSyncModal] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "success" });
 
@@ -122,9 +127,15 @@ export default function ApigeeAppsManager({
   // ----- Delete app -----
   const deleteApp = async (name) => {
     if (!name || !developerEmail) return;
+    const app = apps.find((item) => item.name === name);
+    if (!app?.onboardingId) {
+      alert("This consumer has no onboarding context and cannot be tracked for deletion.");
+      return;
+    }
     try {
       await apigeeApiFetch(APIGEE_ENDPOINTS.APPS.DELETE(selectedOrg, developerEmail, name), {
         method: "DELETE",
+        headers: getTrackingHeaders({ onboardingId: app.onboardingId }),
       });
       setApps((prev) => prev.filter((a) => a.name !== name));
     } catch (e) {
@@ -176,6 +187,25 @@ export default function ApigeeAppsManager({
     } finally {
       setIsFetchingAppDetails(false);
     }
+  };
+
+  const handleAuditView = async (app) => {
+    const appName = app?.name || app?.appId;
+    if (!appName || !selectedOrg || !developerEmail) return;
+    setAuditLoading(true);
+    setAuditDetails({ name: appName, audit: null, resource: null });
+    try {
+      const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+      const [auditRes, resourceRes] = await Promise.all([
+        apigeeApiFetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/DEVELOPER_APP/${encodeURIComponent(appName)}?developer=${encodeURIComponent(developerEmail)}`),
+        apigeeApiFetch(APIGEE_ENDPOINTS.APPS.GET(effectiveOrg, developerEmail, appName)),
+      ]);
+      if (!auditRes.ok) throw new Error(`Audit request failed: ${auditRes.status}`);
+      if (!resourceRes.ok) throw new Error(`Consumer detail request failed: ${resourceRes.status}`);
+      setAuditDetails({ name: appName, audit: await auditRes.json(), resource: await resourceRes.json() });
+    } catch (error) {
+      setAuditDetails({ name: appName, audit: { history: [], registry: null }, error: error.message });
+    } finally { setAuditLoading(false); }
   };
 
   // ----- Edit app -----
@@ -421,6 +451,13 @@ export default function ApigeeAppsManager({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
+                           onClick={() => handleAuditView(app)}
+                           className="p-2 rounded-md border border-dark-700 text-gray-400 hover:text-blue-400 hover:border-blue-400 hover:bg-dark-800"
+                           title="View details and history"
+                         >
+                           <Eye size={14} />
+                         </button>
+                         <button
                           onClick={() => handleAppView(app)}
                           className="p-2 rounded-md border border-dark-700 text-gray-400 hover:text-blue-400 hover:border-blue-400 hover:bg-dark-800"
                           title="View credentials"
@@ -503,6 +540,15 @@ export default function ApigeeAppsManager({
           developerId={developerEmail}
           appName={selectedAppName}
         />
+      )}
+
+      {auditDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setAuditDetails(null)}>
+          <div className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl border border-dark-700 bg-[#111520] p-6" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-5 flex items-center justify-between border-b border-dark-700 pb-4"><div><h2 className="text-xl font-semibold text-white">Consumer Details</h2><p className="text-sm text-gray-400">{auditDetails.name}</p></div><button onClick={() => setAuditDetails(null)} className="text-gray-400 hover:text-white">×</button></div>
+            {auditLoading ? <div className="text-sm text-gray-400">Loading complete consumer details...</div> : auditDetails.error ? <p className="text-sm text-red-400">{auditDetails.error}</p> : <><ResourceAuditDetails audit={auditDetails.audit} /><details className="mt-5 rounded-lg border border-dark-700 p-3"><summary className="cursor-pointer text-sm text-gray-300">All consumer fields</summary><pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-gray-400">{JSON.stringify(auditDetails.resource, null, 2)}</pre></details></>}
+          </div>
+        </div>
       )}
 
       {isAppSyncModal && (

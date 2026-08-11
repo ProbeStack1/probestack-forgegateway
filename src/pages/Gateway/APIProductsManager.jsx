@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Edit, Trash2, Plus, ArrowLeft, Loader2, Copy, GitBranch, X } from 'lucide-react';
+import { Search, Edit, Trash2, Plus, ArrowLeft, Loader2, Copy, GitBranch, X, Eye } from 'lucide-react';
 import { GatewayContextSelector } from './GatewayContextSelector';
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import ResourceAuditDetails from './ResourceAuditDetails';
+import { getTrackingHeaders } from '../Apigee/components/apigeeTracking';
 
 // Helper to fetch Apigee token
 const fetchToken = async () => {
@@ -37,6 +39,7 @@ const APIProductsManager = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [view, setView] = useState('list');
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [loadingProductDetails, setLoadingProductDetails] = useState(false);
   const [productPage, setProductPage] = useState(1);
   const [productPageSize, setProductPageSize] = useState(10);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -68,6 +71,10 @@ const APIProductsManager = ({
   const [newAttribute, setNewAttribute] = useState({ name: '', value: '' });
 
   const getEffectiveOrg = () => selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+  const getTracking = () => ({
+    onboardingId: buAppDetails.onboardingId,
+    microserviceId: buAppDetails.applicationId,
+  });
 
   // Validate product name (Apigee rules: letters, numbers, hyphens, underscores, no spaces)
   const isValidProductName = (name) => /^[a-zA-Z0-9_-]+$/.test(name);
@@ -182,7 +189,7 @@ const APIProductsManager = ({
     try {
       const token = await fetchToken();
       if (!token) throw new Error('No token');
-      const url = `https://apigee.googleapis.com/v1/organizations/${org}/apiproducts/${productName}`;
+       const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
@@ -378,6 +385,10 @@ const APIProductsManager = ({
     }
 
     const org = getEffectiveOrg();
+    if (!buAppDetails.onboardingId) {
+      showMessage?.('Select a business unit with an onboarding context before saving a product.', 'error');
+      return;
+    }
     const token = await fetchToken();
     if (!token) {
       showMessage?.('Failed to obtain authentication token.', 'error');
@@ -392,10 +403,10 @@ const APIProductsManager = ({
           return;
         }
         const payload = buildApigeePayload(formData);
-        const url = `https://apigee.googleapis.com/v1/organizations/${org}/apiproducts`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+         const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
+         const res = await fetch(url, {
+           method: 'POST',
+           headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -405,10 +416,10 @@ const APIProductsManager = ({
         showMessage?.('Product created successfully', 'success');
       } else {
         const payload = buildApigeePayload(formData);
-        const url = `https://apigee.googleapis.com/v1/organizations/${org}/apiproducts/${productName}`;
-        const res = await fetch(url, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+         const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
+         const res = await fetch(url, {
+           method: 'PUT',
+           headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
@@ -428,10 +439,14 @@ const APIProductsManager = ({
   const handleDelete = async (productName) => {
     if (!window.confirm(`Delete product "${productName}"? This action cannot be undone.`)) return;
     const org = getEffectiveOrg();
+    if (!buAppDetails.onboardingId) {
+      showMessage?.('Select a business unit with an onboarding context before deleting a product.', 'error');
+      return;
+    }
     try {
       const token = await fetchToken();
-      const url = `https://apigee.googleapis.com/v1/organizations/${org}/apiproducts/${productName}`;
-      const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
+      const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchProducts();
       showMessage?.(`Product "${productName}" deleted`, 'success');
@@ -442,6 +457,10 @@ const APIProductsManager = ({
   };
 
   const handleClone = async (product) => {
+    if (!buAppDetails.onboardingId) {
+      showMessage?.('Select a business unit with an onboarding context before cloning a product.', 'error');
+      return;
+    }
     const newName = `${product.name}_clone_${Date.now()}`;
     const fullProduct = await fetchProductDetails(product.name);
     if (!fullProduct) {
@@ -457,10 +476,10 @@ const APIProductsManager = ({
     const org = getEffectiveOrg();
     try {
       const token = await fetchToken();
-      const url = `https://apigee.googleapis.com/v1/organizations/${org}/apiproducts`;
+      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
       const res = await fetch(url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
         body: JSON.stringify(clonedPayload),
       });
       if (res.ok) {
@@ -481,8 +500,12 @@ const APIProductsManager = ({
   };
 
   const handleView = (product) => {
+    setLoadingProductDetails(true);
     setSelectedProduct(product);
     setView('view');
+    fetchProductDetails(product.name).then((details) => {
+      if (details) setSelectedProduct({ ...product, ...details });
+    }).finally(() => setLoadingProductDetails(false));
   };
 
   // Table row handlers with validation for plus buttons
@@ -685,7 +708,8 @@ const APIProductsManager = ({
                       )}
                     </td>
                     <td className="p-3 flex gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="Edit"><Edit size={16} /></button>
+                       <button onClick={(e) => { e.stopPropagation(); handleView(product); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="View details"><Eye size={16} /></button>
+                       <button onClick={(e) => { e.stopPropagation(); handleEdit(product); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="Edit"><Edit size={16} /></button>
                       <button onClick={(e) => { e.stopPropagation(); handleClone(product); }} className="text-emerald-400 hover:text-emerald-300" title="Clone"><Copy size={16} /></button>
                       <button onClick={(e) => { e.stopPropagation(); handleVersioning(product); }} className="text-amber-400 hover:text-amber-300" title="Versioning"><GitBranch size={16} /></button>
                       <button onClick={(e) => { e.stopPropagation(); handleDelete(product.name); }} className="text-red-400 hover:text-red-500" title="Delete"><Trash2 size={16} /></button>
@@ -986,14 +1010,17 @@ const APIProductsManager = ({
           <button onClick={() => setView('list')} className="text-[#ff5b1f] rounded-md"><ArrowLeft size={20} /></button>
           <h2 className="text-xl font-semibold">{selectedProduct.name}</h2>
         </div>
-        <div className="bg-[#111520] rounded-xl border border-[#1f2840] p-6 space-y-6">
-          <div className="grid grid-cols-2 gap-4">
+         <div className="bg-[#111520] rounded-xl border border-[#1f2840] p-6 space-y-6">
+           {loadingProductDetails && <div className="text-sm text-slate-400"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading complete product details...</div>}
+           <div className="grid grid-cols-2 gap-4">
             <div><div className="text-xs text-[#5a6a8a]">Name</div><div className="text-white">{selectedProduct.name}</div></div>
             <div><div className="text-xs text-[#5a6a8a]">Display Name</div><div className="text-white">{selectedProduct.displayName || '-'}</div></div>
             <div><div className="text-xs text-[#5a6a8a]">Environments</div><div className="text-white">{selectedProduct.environments}</div></div>
             <div><div className="text-xs text-[#5a6a8a]">Description</div><div className="text-white">{selectedProduct.description || 'N/A'}</div></div>
-          </div>
-        </div>
+           </div>
+           <ResourceAuditDetails audit={selectedProduct.audit} />
+           <details className="rounded-lg border border-[#2a3550] p-3"><summary className="cursor-pointer text-sm text-slate-300">All product fields</summary><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-400">{JSON.stringify(selectedProduct, null, 2)}</pre></details>
+         </div>
       </div>
     );
   }

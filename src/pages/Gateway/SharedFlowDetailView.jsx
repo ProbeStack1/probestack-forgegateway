@@ -332,7 +332,9 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                     <tr>
                       <th className="text-left p-3 text-[#5a6a8a] font-medium">Revision</th>
                       <th className="text-left p-3 text-[#5a6a8a] font-medium">Policies</th>
-                      <th className="text-left p-3 text-[#5a6a8a] font-medium">Last Modified</th>
+                       <th className="text-left p-3 text-[#5a6a8a] font-medium">Created by / at</th>
+                       <th className="text-left p-3 text-[#5a6a8a] font-medium">Modified by / at</th>
+                       <th className="text-left p-3 text-[#5a6a8a] font-medium">What changed</th>
                       <th className="text-left p-3 text-[#5a6a8a] font-medium">Base Path</th>
                     </tr>
                   </thead>
@@ -380,7 +382,9 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                                 )}
                               </div>
                             </td>
-                            <td className="p-3 text-slate-400 text-xs">{formatDate(data?.lastModifiedAt)}</td>
+                             <td className="p-3 text-slate-400 text-xs">{data?.metaData?.createdBy || data?.metadata?.createdBy || '—'}<br />{formatDate(data?.metaData?.createdAt || data?.metadata?.createdAt)}</td>
+                             <td className="p-3 text-slate-400 text-xs">{data?.metaData?.lastModifiedBy || data?.metadata?.lastModifiedBy || '—'}<br />{formatDate(data?.metaData?.lastModifiedAt || data?.metadata?.lastModifiedAt || data?.lastModifiedAt)}</td>
+                             <td className="p-3 text-xs text-slate-400"><details><summary className="cursor-pointer text-[#4f8ef7]">View payload</summary><pre className="mt-2 max-w-sm max-h-32 overflow-auto whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre></details></td>
                             <td className="p-3">
                               <code className="text-xs text-[#4f8ef7] bg-[#0f1117] px-2 py-1 rounded">
                                 {data?.basepaths?.[0] || '/'}
@@ -403,7 +407,9 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                               </div>
                             </td>
                             <td className="p-3"><span className="text-slate-500 text-xs">—</span></td>
-                            <td className="p-3 text-slate-400 text-xs">{formatDate(sharedFlow.lastModifiedAt)}</td>
+                           <td className="p-3 text-slate-400 text-xs">—</td>
+                           <td className="p-3 text-slate-400 text-xs">{formatDate(sharedFlow.lastModifiedAt)}</td>
+                           <td className="p-3 text-xs text-slate-400">Revision payload unavailable</td>
                             <td className="p-3"><code className="text-xs text-[#4f8ef7] bg-[#0f1117] px-2 py-1 rounded">/</code></td>
                           </tr>
                         );
@@ -411,7 +417,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                     }
                     {getRevisionsList().length === 0 && (
                       <tr>
-                        <td colSpan="4" className="p-8 text-center text-slate-400">
+                         <td colSpan="7" className="p-8 text-center text-slate-400">
                           <Layers className="h-8 w-8 mx-auto mb-2 text-slate-600" />
                           <p>No revisions available</p>
                         </td>

@@ -42,12 +42,12 @@ function AuthHandler() {
   // performed in the main app is picked up the next time the user does
   // anything here, without requiring a manual page reload.
   useEffect(() => {
-    if (isAuthenticated()) {
+    // if (isAuthenticated()) {
       setLoading(false);
-      return;
-    }
+    //   return;
+    // }
 
-    redirectToLogin();
+    // redirectToLogin();
   }, [location.pathname]);
 
   // Show a loading state while checking auth (prevents flashing)

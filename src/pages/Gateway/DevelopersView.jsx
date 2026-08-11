@@ -11,6 +11,75 @@ import { PaginationControls } from "../../components/ui/PaginationControls";
 import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import ResourceAuditDetails from './ResourceAuditDetails';
 
+// Defined at module scope (not inside DevelopersView) so they keep a stable
+// component identity across re-renders — otherwise React treats every
+// keystroke's re-render as a brand new input type and remounts it,
+// dropping focus after each character.
+const FormInput = ({ icon: Icon, label, name, value, onChange, error, placeholder, type = "text", disabled = false }) => (
+  <div className="space-y-1.5">
+    <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</label>
+    <div className="relative">
+      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />}
+      <input
+        type={type}
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`w-full bg-[#0f1117] border ${error ? 'border-red-500' : 'border-[#2a3550]'} rounded-lg ${Icon ? 'pl-9' : 'pl-3'} pr-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-[#ff5b1f] focus:ring-1 focus:ring-[#ff5b1f]/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed`}
+      />
+    </div>
+    {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+  </div>
+);
+
+const FormSelect = ({ icon: Icon, label, value, onChange, options, error }) => (
+  <div className="space-y-1.5">
+    <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</label>
+    <div className="relative">
+      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 z-10" />}
+      <select
+        value={value}
+        onChange={onChange}
+        className={`w-full bg-[#0f1117] border ${error ? 'border-red-500' : 'border-[#2a3550]'} rounded-lg ${Icon ? 'pl-9' : 'pl-3'} pr-8 py-2.5 text-sm text-white appearance-none focus:outline-none focus:border-[#ff5b1f] focus:ring-1 focus:ring-[#ff5b1f]/50 transition-all cursor-pointer`}
+      >
+        {options.map(opt => (
+          <option key={opt.value} value={opt.value} className="bg-[#111520] text-white">
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+    </div>
+    {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+  </div>
+);
+
+const ModalHeader = ({ title, icon: Icon, onClose }) => (
+  <div className="flex items-center justify-between pb-4 border-b border-[#2a3550]">
+    <div className="flex items-center gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff5b1f] to-[#ff8a5c] shadow-lg shadow-[#ff5b1f]/30">
+        <Icon className="h-5 w-5 text-white" />
+      </div>
+      <div>
+        <h2 className="text-xl font-semibold text-white">{title}</h2>
+        <p className="text-xs text-slate-400 mt-0.5">Fill in the details below</p>
+      </div>
+    </div>
+    {/* <button
+      onClick={onClose}
+      className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-all"
+    >
+      <X className="h-5 w-5" />
+    </button> */}
+  </div>
+);
+
 export const DevelopersView = ({ showMessage }) => {
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -303,73 +372,6 @@ export const DevelopersView = ({ showMessage }) => {
     setSelectedDeveloper(dev);
     setDeleteConfirmOpen(true);
   };
-
-  // ----- Form Components -----
-  const FormInput = ({ icon: Icon, label, name, value, onChange, error, placeholder, type = "text", disabled = false }) => (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</label>
-      <div className="relative">
-        {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />}
-        <input
-          type={type}
-          name={name}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          disabled={disabled}
-          className={`w-full bg-[#0f1117] border ${error ? 'border-red-500' : 'border-[#2a3550]'} rounded-lg ${Icon ? 'pl-9' : 'pl-3'} pr-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-[#ff5b1f] focus:ring-1 focus:ring-[#ff5b1f]/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed`}
-        />
-      </div>
-      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
-    </div>
-  );
-
-  const FormSelect = ({ icon: Icon, label, value, onChange, options, error }) => (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</label>
-      <div className="relative">
-        {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 z-10" />}
-        <select
-          value={value}
-          onChange={onChange}
-          className={`w-full bg-[#0f1117] border ${error ? 'border-red-500' : 'border-[#2a3550]'} rounded-lg ${Icon ? 'pl-9' : 'pl-3'} pr-8 py-2.5 text-sm text-white appearance-none focus:outline-none focus:border-[#ff5b1f] focus:ring-1 focus:ring-[#ff5b1f]/50 transition-all cursor-pointer`}
-        >
-          {options.map(opt => (
-            <option key={opt.value} value={opt.value} className="bg-[#111520] text-white">
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-          <svg className="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </div>
-      </div>
-      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
-    </div>
-  );
-
-  // ----- Modal Header (without duplicate close) -----
-  const ModalHeader = ({ title, icon: Icon, onClose }) => (
-    <div className="flex items-center justify-between pb-4 border-b border-[#2a3550]">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff5b1f] to-[#ff8a5c] shadow-lg shadow-[#ff5b1f]/30">
-          <Icon className="h-5 w-5 text-white" />
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Fill in the details below</p>
-        </div>
-      </div>
-      {/* <button
-        onClick={onClose}
-        className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-all"
-      >
-        <X className="h-5 w-5" />
-      </button> */}
-    </div>
-  );
 
   // ----- Modals -----
   const renderCreateEditModal = () => {

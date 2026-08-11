@@ -447,8 +447,9 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     // };
     const formatDate = (timestamp) => {
         if (!timestamp) return '—';
-        const date = new Date(parseInt(timestamp));
-        return date.toLocaleDateString();
+        const raw = String(timestamp).trim();
+        const date = /^-?\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
     };
 
     const getLatestRevisionData = () => {

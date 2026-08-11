@@ -99,7 +99,13 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
   const getRevisionsList = () => sharedFlowDetails?.revisions || sharedFlow.revisions || [];
   const getRevisionDetails = () => sharedFlowDetails?.revisionDetails || [];
   const getDeployments = () => sharedFlowDetails?.deployments?.deployments || [];
-  const formatDate = (ts) => ts ? new Date(parseInt(ts)).toLocaleDateString() : (sharedFlow.lastModifiedAt ? new Date(sharedFlow.lastModifiedAt).toLocaleDateString() : "—");
+  const formatDate = (ts) => {
+    const raw = ts ?? sharedFlow.lastModifiedAt;
+    if (!raw) return "—";
+    const value = String(raw).trim();
+    const date = /^-?\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
+  };
 
   const [editorLoading, setEditorLoading] = useState(false);
   const hasNavigated = useRef(false);

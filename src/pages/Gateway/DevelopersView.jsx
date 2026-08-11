@@ -98,7 +98,8 @@ export const DevelopersView = ({ showMessage }) => {
               lastName: details.lastName || "",
               status: details.status || "active",
               appsCount: details.apps?.length || 0,
-              createdAt: details.createdAt || details.createdAt,
+              createdAt: details.createdAt,
+              lastModifiedAt: details.lastModifiedAt,
               apps: details.apps || [],
               audit: details.audit,
             };
@@ -112,6 +113,7 @@ export const DevelopersView = ({ showMessage }) => {
             status: "active",
             appsCount: 0,
             createdAt: null,
+            lastModifiedAt: null,
             apps: [],
           };
         })
@@ -149,12 +151,9 @@ export const DevelopersView = ({ showMessage }) => {
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "—";
-    return new Date(timestamp).toLocaleString();
-  };
-
-  const truncateText = (text, maxLength = 10) => {
-    if (!text) return text;
-    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+    const raw = String(timestamp).trim();
+    const date = /^-?\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
   };
 
   const validateForm = () => {
@@ -460,7 +459,7 @@ export const DevelopersView = ({ showMessage }) => {
 
   const renderViewModal = () => (
   <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
-    <DialogContent className="w-[70vw] bg-gradient-to-br from-[#111520] to-[#0a0e18] border border-[#2a3550] rounded-2xl shadow-2xl shadow-black/50 p-0 overflow-hidden [&>button[aria-label='Close']]:hidden">
+    <DialogContent className="w-[70vw] max-w-[70vw] bg-gradient-to-br from-[#111520] to-[#0a0e18] border border-[#2a3550] rounded-2xl shadow-2xl shadow-black/50 p-0 overflow-hidden [&>button[aria-label='Close']]:hidden">
       <div className="flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[#2a3550] bg-gradient-to-r from-[#ff5b1f]/5 to-transparent">
@@ -473,6 +472,12 @@ export const DevelopersView = ({ showMessage }) => {
               <p className="text-xs text-slate-400 mt-0.5">Complete developer profile</p>
             </div>
           </div>
+          <button
+            onClick={() => setViewModalOpen(false)}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-all"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
 
         {/* Content - scrollable if needed */}
@@ -541,6 +546,7 @@ export const DevelopersView = ({ showMessage }) => {
                     <p className="text-sm text-white">{formatDate(selectedDeveloper.createdAt)}</p>
                   </div>
                 </div>
+
               </div>
 
               {/* Apps list if any */}
@@ -556,7 +562,19 @@ export const DevelopersView = ({ showMessage }) => {
                   </div>
                 </div>
               )}
-              <ResourceAuditDetails audit={selectedDeveloper.audit} />
+              <ResourceAuditDetails
+                audit={{
+                  ...selectedDeveloper.audit,
+                  registry: {
+                    ...selectedDeveloper.audit?.registry,
+                    createdAt: selectedDeveloper.audit?.registry?.createdAt || selectedDeveloper.createdAt,
+                    updatedAt: selectedDeveloper.audit?.registry?.updatedAt || selectedDeveloper.lastModifiedAt,
+                  },
+                }}
+                showSourceStatus={false}
+                showCreatorModifier={false}
+                showHistory={false}
+              />
             </>
           )}
         </div>
@@ -672,26 +690,26 @@ export const DevelopersView = ({ showMessage }) => {
       ) : (
         <>
           <div className="overflow-hidden rounded-lg border border-dark-700">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm table-fixed">
               <thead className="bg-dark-800/70 border-b border-dark-700">
                 <tr>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">Email</th>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">User Name</th>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">Apps</th>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">Member since</th>
-                  <th className="text-left p-3 text-[#5a6a8a] font-medium">Actions</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[18%]">Name</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[24%]">Email</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[24%]">User Name</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[8%]">Apps</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[14%]">Member since</th>
+                  <th className="text-left p-3 text-[#5a6a8a] font-medium w-[12%]">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedDevelopers.map((dev) => (
                   <tr key={dev.userName} className="border-b border-dark-700 hover:bg-dark-800/40">
-                    <td className="p-3 text-white">{dev.name}</td>
-                    <td className="p-3 text-[#7f8fa8]">{dev.email}</td>
-                    <td className="p-3 text-[#7f8fa8]">{dev.userName}</td>
+                    <td className="p-3 text-white truncate" title={dev.name}>{dev.name}</td>
+                    <td className="p-3 text-[#7f8fa8] truncate" title={dev.email}>{dev.email}</td>
+                    <td className="p-3 text-[#7f8fa8] truncate" title={dev.userName}>{dev.userName}</td>
                     <td className="p-3 text-[#7f8fa8]">{dev.appsCount}</td>
-                    <td className="p-3 text-[#7f8fa8] whitespace-nowrap" title={formatDate(dev.createdAt)}>
-                      {truncateText(formatDate(dev.createdAt))}
+                    <td className="p-3 text-[#7f8fa8] truncate" title={formatDate(dev.createdAt)}>
+                      {formatDate(dev.createdAt)}
                     </td>
                     <td className="p-3">
                       <div className="flex items-center gap-2">

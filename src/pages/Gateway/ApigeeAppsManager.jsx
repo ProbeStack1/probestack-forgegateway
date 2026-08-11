@@ -11,6 +11,10 @@ import {
   AlertTriangle,
   Key,
   Eye,
+  Smartphone,
+  User,
+  Calendar,
+  X,
 } from "lucide-react";
 import { apigeeApiFetch } from "../../services/apigeeApiService";
 import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
@@ -21,6 +25,8 @@ import { TableSkeletonRows } from "../../components/ui/SkeletonLoader";
 import useApigeeDevelopers from "../../pages/Apigee/components/useApigeeDevelopers";
 import { GatewayContextSelector } from "./GatewayContextSelector";
 import { PaginationControls } from "../../components/ui/PaginationControls";
+import { Button } from "../../components/ui/button";
+import { Dialog, DialogContent } from "../../components/ui/dialog";
 import ResourceAuditDetails from './ResourceAuditDetails';
 import { getTrackingHeaders } from '../Apigee/components/apigeeTracking';
 
@@ -206,6 +212,14 @@ export default function ApigeeAppsManager({
     } catch (error) {
       setAuditDetails({ name: appName, audit: { history: [], registry: null }, error: error.message });
     } finally { setAuditLoading(false); }
+  };
+
+  // ----- Format date helper -----
+  const formatDate = (timestamp) => {
+    if (!timestamp) return "-";
+    const raw = String(timestamp).trim();
+    const date = /^-?\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+    return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
   };
 
   // ----- Edit app -----
@@ -542,14 +556,114 @@ export default function ApigeeAppsManager({
         />
       )}
 
-      {auditDetails && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setAuditDetails(null)}>
-          <div className="w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-xl border border-dark-700 bg-[#111520] p-6" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-5 flex items-center justify-between border-b border-dark-700 pb-4"><div><h2 className="text-xl font-semibold text-white">Consumer Details</h2><p className="text-sm text-gray-400">{auditDetails.name}</p></div><button onClick={() => setAuditDetails(null)} className="text-gray-400 hover:text-white">×</button></div>
-            {auditLoading ? <div className="text-sm text-gray-400">Loading complete consumer details...</div> : auditDetails.error ? <p className="text-sm text-red-400">{auditDetails.error}</p> : <><ResourceAuditDetails audit={auditDetails.audit} /><details className="mt-5 rounded-lg border border-dark-700 p-3"><summary className="cursor-pointer text-sm text-gray-300">All consumer fields</summary><pre className="mt-3 overflow-auto whitespace-pre-wrap text-xs text-gray-400">{JSON.stringify(auditDetails.resource, null, 2)}</pre></details></>}
+      <Dialog open={!!auditDetails} onOpenChange={(open) => !open && setAuditDetails(null)}>
+        <DialogContent className="w-[70vw] max-w-[70vw] bg-gradient-to-br from-[#111520] to-[#0a0e18] border border-[#2a3550] rounded-2xl shadow-2xl shadow-black/50 p-0 overflow-hidden [&>button[aria-label='Close']]:hidden">
+          <div className="flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-[#2a3550] bg-gradient-to-r from-[#ff5b1f]/5 to-transparent">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff5b1f] to-[#ff8a5c] shadow-lg shadow-[#ff5b1f]/30">
+                  <Smartphone className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-white">Consumer Details</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Complete consumer app profile</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAuditDetails(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-all"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content - scrollable if needed */}
+            <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+              {auditLoading ? (
+                <div className="text-sm text-gray-400">Loading complete consumer details...</div>
+              ) : auditDetails?.error ? (
+                <p className="text-sm text-red-400">{auditDetails.error}</p>
+              ) : auditDetails && (
+                <>
+                  {/* Profile header */}
+                  <div className="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-[#ff5b1f]/10 to-transparent border border-[#ff5b1f]/20">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[#ff5b1f] to-[#ff8a5c] shadow-lg">
+                      <Smartphone className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-white">{auditDetails.resource?.name || auditDetails.name}</h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+                          auditDetails.resource?.status === "approved" || auditDetails.resource?.status === "active"
+                            ? "bg-green-500/20 text-green-300"
+                            : "bg-red-500/20 text-red-300"
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${auditDetails.resource?.status === "approved" || auditDetails.resource?.status === "active" ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+                          {auditDetails.resource?.status || "-"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Info fields - stacked for compactness */}
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <Key className="h-4 w-4 text-[#ff8a5c] mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">App ID</p>
+                        <p className="text-sm text-white font-mono break-all">{auditDetails.resource?.appId || "-"}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <User className="h-4 w-4 text-[#ff8a5c] mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Developer ID</p>
+                        <p className="text-sm text-white break-all">{auditDetails.resource?.developerId || "-"}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <Calendar className="h-4 w-4 text-[#ff8a5c] mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Created at</p>
+                        <p className="text-sm text-white">{formatDate(auditDetails.resource?.createdAt)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/10">
+                      <Calendar className="h-4 w-4 text-[#ff8a5c] mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Last modified at</p>
+                        <p className="text-sm text-white">{formatDate(auditDetails.resource?.lastModifiedAt)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <ResourceAuditDetails
+                    audit={auditDetails.audit}
+                    showHistory={false}
+                    showAuditDates={false}
+                    showDeleted={false}
+                    showSourceStatus={false}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end px-6 py-4 border-t border-[#2a3550] bg-black/20">
+              <Button
+                onClick={() => setAuditDetails(null)}
+                className="bg-gradient-to-r from-[#ff5b1f] to-[#ff7a3f] hover:from-[#ff6b36] hover:to-[#ff8a5c] text-white shadow-lg shadow-[#ff5b1f]/20"
+              >
+                Close
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {isAppSyncModal && (
         <AppSyncModal

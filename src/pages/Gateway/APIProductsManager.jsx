@@ -1018,7 +1018,7 @@ const APIProductsManager = ({
             <div><div className="text-xs text-[#5a6a8a]">Environments</div><div className="text-white">{selectedProduct.environments}</div></div>
             <div><div className="text-xs text-[#5a6a8a]">Description</div><div className="text-white">{selectedProduct.description || 'N/A'}</div></div>
            </div>
-           <ResourceAuditDetails audit={selectedProduct.audit} />
+           <ResourceAuditDetails audit={selectedProduct.audit} showHistory={false} showDeleted={false} />
            <details className="rounded-lg border border-[#2a3550] p-3"><summary className="cursor-pointer text-sm text-slate-300">All product fields</summary><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-400">{JSON.stringify(selectedProduct, null, 2)}</pre></details>
          </div>
       </div>

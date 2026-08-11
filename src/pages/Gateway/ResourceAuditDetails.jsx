@@ -6,31 +6,35 @@ const display = (value) => {
   return String(value);
 };
 
-const date = (value) => (value ? new Date(value).toLocaleString() : "-");
+const date = (value) => {
+  if (value === null || value === undefined || value === "") return "-";
+  const raw = String(value).trim();
+  const parsed = /^-?\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString();
+};
 
-export default function ResourceAuditDetails({ audit }) {
+export default function ResourceAuditDetails({ audit, showHistory = true, showAuditDates = true, showDeleted = false, showSourceStatus = true, showCreatorModifier = true }) {
   const registry = audit?.registry || {};
   const history = audit?.history || [];
+  const fields = [
+    ...(showSourceStatus ? [["Source", registry.source], ["Status", registry.status]] : []),
+    ...(showCreatorModifier ? [["Created by", registry.createdBy]] : []),
+    ...(showAuditDates ? [["Created at", date(registry.createdAt)]] : []),
+    ...(showCreatorModifier ? [["Last modified by", registry.updatedBy]] : []),
+    ...(showAuditDates ? [["Last modified at", date(registry.updatedAt)]] : []),
+    ...(showDeleted ? [["Deleted by", registry.deletedBy], ["Deleted at", date(registry.deletedAt)]] : []),
+  ];
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {[
-          ["Created by", registry.createdBy],
-          ["Created at", date(registry.createdAt)],
-          ["Last modified by", registry.updatedBy],
-          ["Last modified at", date(registry.updatedAt)],
-          ["Deleted by", registry.deletedBy],
-          ["Deleted at", date(registry.deletedAt)],
-          ["Source", registry.source],
-          ["Status", registry.status],
-        ].map(([label, value]) => (
+        {fields.map(([label, value]) => (
           <div key={label} className="rounded-lg border border-[#2a3550] bg-[#0f1117] p-3">
             <div className="text-[11px] uppercase tracking-wide text-[#5a6a8a]">{label}</div>
             <div className="mt-1 break-words text-sm text-white">{display(value)}</div>
           </div>
         ))}
       </div>
-      <div>
+      {showHistory && <div>
         <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-300">Revision / change history</h3>
         {history.length === 0 ? <p className="text-sm text-slate-500">No tracked changes found.</p> : (
           <div className="space-y-3">
@@ -53,7 +57,7 @@ export default function ResourceAuditDetails({ audit }) {
             ))}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -385,10 +385,6 @@ const APIProductsManager = ({
     }
 
     const org = getEffectiveOrg();
-    if (!buAppDetails.onboardingId) {
-      showMessage?.('Select a business unit with an onboarding context before saving a product.', 'error');
-      return;
-    }
     const token = await fetchToken();
     if (!token) {
       showMessage?.('Failed to obtain authentication token.', 'error');
@@ -439,10 +435,6 @@ const APIProductsManager = ({
   const handleDelete = async (productName) => {
     if (!window.confirm(`Delete product "${productName}"? This action cannot be undone.`)) return;
     const org = getEffectiveOrg();
-    if (!buAppDetails.onboardingId) {
-      showMessage?.('Select a business unit with an onboarding context before deleting a product.', 'error');
-      return;
-    }
     try {
       const token = await fetchToken();
       const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
@@ -457,10 +449,6 @@ const APIProductsManager = ({
   };
 
   const handleClone = async (product) => {
-    if (!buAppDetails.onboardingId) {
-      showMessage?.('Select a business unit with an onboarding context before cloning a product.', 'error');
-      return;
-    }
     const newName = `${product.name}_clone_${Date.now()}`;
     const fullProduct = await fetchProductDetails(product.name);
     if (!fullProduct) {

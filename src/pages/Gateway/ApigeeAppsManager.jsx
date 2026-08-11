@@ -134,14 +134,10 @@ export default function ApigeeAppsManager({
   const deleteApp = async (name) => {
     if (!name || !developerEmail) return;
     const app = apps.find((item) => item.name === name);
-    if (!app?.onboardingId) {
-      alert("This consumer has no onboarding context and cannot be tracked for deletion.");
-      return;
-    }
     try {
       await apigeeApiFetch(APIGEE_ENDPOINTS.APPS.DELETE(selectedOrg, developerEmail, name), {
         method: "DELETE",
-        headers: getTrackingHeaders({ onboardingId: app.onboardingId }),
+        headers: getTrackingHeaders({ onboardingId: app?.onboardingId }),
       });
       setApps((prev) => prev.filter((a) => a.name !== name));
     } catch (e) {

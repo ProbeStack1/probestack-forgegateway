@@ -8,6 +8,23 @@ const getCurrentUserEmail = () => {
   return window.localStorage.getItem("userEmail") || "";
 };
 
+// Falls back to the logged-in ForgeSphere user's identity (hydrated into
+// localStorage by main.jsx from the session URL params) when no formal
+// onboarding context has been selected/loaded, so creator/modifier tracking
+// never hard-blocks an action just because the onboarding list is empty.
+export const getFallbackOnboardingId = () => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return (
+    window.localStorage.getItem("organizationId") ||
+    window.localStorage.getItem("userOrganizationId") ||
+    getCurrentUserEmail() ||
+    ""
+  );
+};
+
 const unwrapList = (payload) => {
   const data = payload?.data ?? payload;
 
@@ -114,8 +131,9 @@ export const getTrackingHeaders = ({ onboardingId, microserviceId } = {}) => {
     "Content-Type": "application/json",
   };
 
-  if (onboardingId) {
-    headers["x-onboarding-id"] = onboardingId;
+  const effectiveOnboardingId = onboardingId || getFallbackOnboardingId();
+  if (effectiveOnboardingId) {
+    headers["x-onboarding-id"] = effectiveOnboardingId;
   }
 
   if (microserviceId) {

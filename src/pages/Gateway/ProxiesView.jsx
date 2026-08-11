@@ -12,7 +12,7 @@ import { GatewayContextSelector } from "./GatewayContextSelector";
 import JSZip from "jszip";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTargetServerModal";
-import { getTrackingHeaders, loadApigeeOnboardingOptions } from "../Apigee/components/apigeeTracking";
+import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
 
 export const ProxiesView = ({ showMessage }) => {
@@ -417,16 +417,25 @@ export const ProxiesView = ({ showMessage }) => {
     useEffect(() => {
         const loadOptions = async () => {
             setIsFetchingOnboardings(true);
+            const fallbackOnboardingId = getFallbackOnboardingId();
             try {
                 const options = await loadApigeeOnboardingOptions();
                 setOnboardingOptions(options);
-                // Optionally set default onboarding if needed
                 if (options.length > 0) {
                     setDefaultOnboardingId(options[0].onboardingId);
                     setDefaultMicroserviceId(options[0].microserviceId || "");
+                } else if (fallbackOnboardingId) {
+                    // No formal onboarding registered yet — fall back to the
+                    // current user's identity so creation isn't blocked.
+                    setDefaultOnboardingId(fallbackOnboardingId);
+                    setDefaultMicroserviceId("");
                 }
             } catch (error) {
                 console.error("Failed to load onboarding options", error);
+                if (fallbackOnboardingId) {
+                    setDefaultOnboardingId(fallbackOnboardingId);
+                    setDefaultMicroserviceId("");
+                }
             } finally {
                 setIsFetchingOnboardings(false);
             }
@@ -802,10 +811,6 @@ export const ProxiesView = ({ showMessage }) => {
             const formData = new FormData();
             formData.append("file", zipToUpload);
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
-            if (!defaultOnboardingId) {
-                showMessage("Select an onboarding context before creating an API so creator and modifier details can be tracked.", "error");
-                return;
-            }
             const uploadUrl = `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/apis?action=import&name=${encodeURIComponent(modal.name)}`;
             const response = await fetch(uploadUrl, {
                 method: "POST",

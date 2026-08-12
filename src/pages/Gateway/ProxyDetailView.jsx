@@ -43,6 +43,84 @@ import { useNavigate } from "react-router-dom";
 import ViewSpecModal from "../../components/ViewSpecModal";
 import API_BASE_URL from "../../config/apiConfig";
 import ResourceAuditDetails from './ResourceAuditDetails';
+import JSZip from "jszip";
+
+// ── Bundle parsing: read the ProxyEndpoint / TargetEndpoint XML out of a revision's
+// zip bundle so we can show real flow/condition data Apigee's summarized revision
+// JSON doesn't include (basepaths/policies/target names only — no per-flow detail). ──
+const xmlParser = new DOMParser();
+
+const xmlText = (el) => (el ? (el.textContent || "").trim() : "");
+
+const parseFlowCondition = (flowEl, fallbackName, fallbackMethod, fallbackPath) => {
+    if (!flowEl) return null;
+    const name = flowEl.getAttribute("name") || fallbackName;
+    const condition = xmlText(flowEl.querySelector(":scope > Condition"));
+    if (!condition) {
+        return { name, method: fallbackMethod, path: fallbackPath, condition: "" };
+    }
+    const verbMatch = condition.match(/request\.verb\s*=\s*"([^"]+)"/i);
+    const pathMatch = condition.match(/pathsuffix\s+MatchesPath\s+"([^"]+)"/i);
+    return {
+        name,
+        method: verbMatch ? verbMatch[1].toUpperCase() : "COND",
+        path: pathMatch ? pathMatch[1] : condition,
+        condition,
+    };
+};
+
+const parseProxyEndpointXml = (xmlString) => {
+    const doc = xmlParser.parseFromString(xmlString, "application/xml");
+    const root = doc.querySelector("ProxyEndpoint");
+    if (!root) return null;
+
+    const name = root.getAttribute("name") || "default";
+    const basePath = xmlText(root.querySelector("HTTPProxyConnection > BasePath")) || "/";
+    const targetEndpoints = [...new Set(
+        Array.from(root.querySelectorAll("RouteRule > TargetEndpoint")).map(xmlText).filter(Boolean)
+    )];
+
+    const preFlowEl = root.querySelector(":scope > PreFlow");
+    const postFlowEl = root.querySelector(":scope > PostFlow");
+    const namedFlowEls = Array.from(root.querySelectorAll(":scope > Flows > Flow"));
+
+    const flows = [
+        { name: preFlowEl?.getAttribute("name") || "PreFlow", method: "ALL", path: "n/a", condition: "" },
+        ...namedFlowEls.map((el) => parseFlowCondition(el, "Flow", "COND", "")),
+        { name: postFlowEl?.getAttribute("name") || "PostFlow", method: "ALL", path: "n/a", condition: "" },
+    ].filter(Boolean);
+
+    return { name, basePath, targetEndpoints, flows };
+};
+
+const parseTargetEndpointXml = (xmlString) => {
+    const doc = xmlParser.parseFromString(xmlString, "application/xml");
+    const root = doc.querySelector("TargetEndpoint");
+    if (!root) return null;
+
+    const name = root.getAttribute("name") || "default";
+    const url = xmlText(root.querySelector("HTTPTargetConnection > URL"));
+    const targetServer = root.querySelector("HTTPTargetConnection LoadBalancer Server")?.getAttribute("name") || "";
+    return { name, url, targetServer };
+};
+
+const parseProxyBundle = async (blob) => {
+    const zip = await JSZip.loadAsync(blob);
+    const filePaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir);
+
+    const proxyEndpointPaths = filePaths.filter((path) => path.includes("/proxies/") && path.endsWith(".xml"));
+    const targetEndpointPaths = filePaths.filter((path) => path.includes("/targets/") && path.endsWith(".xml"));
+
+    const proxyEndpoints = (await Promise.all(
+        proxyEndpointPaths.map(async (path) => parseProxyEndpointXml(await zip.files[path].async("text")))
+    )).filter(Boolean);
+
+    const targetEndpoints = (await Promise.all(
+        targetEndpointPaths.map(async (path) => parseTargetEndpointXml(await zip.files[path].async("text")))
+    )).filter(Boolean);
+
+    return { proxyEndpoints, targetEndpoints };
+};
 
 export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete, onDevelop, onDebug, showMessage }) => {
     const [activeTab, setActiveTab] = useState('overview');
@@ -102,6 +180,13 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     const navigate = useNavigate();
     const hasNavigated = useRef(false);
     const [bundleLoading, setBundleLoading] = useState(false);
+
+    // Proxy/Target Endpoint detail parsed straight out of the latest revision's bundle
+    // (basepaths/flows/conditions aren't in Apigee's summarized revision JSON).
+    const [proxyEndpoints, setProxyEndpoints] = useState([]);
+    const [targetEndpointsList, setTargetEndpointsList] = useState([]);
+    const [loadingEndpointDetails, setLoadingEndpointDetails] = useState(false);
+    const [expandedEndpoints, setExpandedEndpoints] = useState({});
 
     const fetchForgesfereInfo = async (resourceId) => {
         setLoadingForgesfere(true);
@@ -464,9 +549,26 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         return latestData?.basepaths?.[0] || '/';
     };
 
-    const getProxyUrl = () => {
-        const latestData = getLatestRevisionData();
-        return latestData?.service?.url || '—';
+    // Apigee's eval/trial default runtime hostname pattern — same convention used on the
+    // API Test page (`${org}-${env}.apigee.net`) — combined with the deployed base path.
+    const getDeploymentUrl = (dep) => {
+        if (!dep?.environment) return null;
+        const basePath = getBasePath();
+        return `https://gen-ai-poc-onboarding-${dep.environment}.apigee.net${basePath === '/' ? '' : basePath}`;
+    };
+
+    // Apigee's revision JSON has no "service.url" field — the real, testable API URL only
+    // exists once the proxy is deployed to an environment, so derive one per active deployment.
+    const getApiUrls = () => {
+        const deployments = proxyDetails?.deployments?.deployments || [];
+        return deployments
+            .map((dep) => ({ environment: dep.environment, url: getDeploymentUrl(dep) }))
+            .filter((entry) => entry.url);
+    };
+
+    const getDeployedEnvironments = () => {
+        const deployments = proxyDetails?.deployments?.deployments || [];
+        return [...new Set(deployments.map((dep) => dep.environment).filter(Boolean))].sort();
     };
 
     const getDescription = () => {
@@ -1447,6 +1549,51 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
             setBundleLoading(false);
         }
     };
+
+    // Fetch + parse the latest revision's bundle for Proxy/Target Endpoint detail
+    // (base paths, route targets, flow conditions) that the summarized revision JSON omits.
+    useEffect(() => {
+        const latestRev = proxyDetails?.proxy?.latestRevisionId;
+        if (!proxy?.name || !latestRev) {
+            setProxyEndpoints([]);
+            setTargetEndpointsList([]);
+            return;
+        }
+
+        let cancelled = false;
+        const loadEndpointDetails = async () => {
+            setLoadingEndpointDetails(true);
+            try {
+                const token = await fetchToken();
+                if (!token) throw new Error('Failed to obtain access token');
+                const url = `https://apigee.googleapis.com/v1/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/revisions/${latestRev}/?format=bundle`;
+                const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const blob = await response.blob();
+                const { proxyEndpoints: parsedProxyEndpoints, targetEndpoints: parsedTargetEndpoints } = await parseProxyBundle(blob);
+                if (cancelled) return;
+                setProxyEndpoints(parsedProxyEndpoints);
+                setTargetEndpointsList(parsedTargetEndpoints);
+                setExpandedEndpoints({}); // closed by default
+            } catch (err) {
+                console.error('Error parsing proxy bundle for endpoint details:', err);
+                if (!cancelled) {
+                    setProxyEndpoints([]);
+                    setTargetEndpointsList([]);
+                }
+            } finally {
+                if (!cancelled) setLoadingEndpointDetails(false);
+            }
+        };
+
+        loadEndpointDetails();
+        return () => { cancelled = true; };
+    }, [proxy?.name, proxyDetails?.proxy?.latestRevisionId]);
+
+    const toggleEndpointExpanded = (name) => setExpandedEndpoints((prev) => ({ ...prev, [name]: !prev[name] }));
+    const expandAllEndpoints = () => setExpandedEndpoints(Object.fromEntries(proxyEndpoints.map((ep) => [ep.name, true])));
+    const collapseAllEndpoints = () => setExpandedEndpoints(Object.fromEntries(proxyEndpoints.map((ep) => [ep.name, false])));
+
     useEffect(() => {
         if (activeTab === 'edit' && !hasNavigated.current && proxy?.name) {
             hasNavigated.current = true;
@@ -2067,8 +2214,22 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">API Type</span>
                                             <span className="text-sm font-mono text-white bg-[#1a1f2e] px-2 py-0.5 rounded">
-                                                {proxyDetails.proxy?.apiProxyType || 'Rest'}
+                                                {(proxyDetails.apiType === 'REST' ? 'Rest' : proxyDetails.apiType) || 'Rest'}
                                             </span>
+                                        </div>
+                                        <div className="flex justify-between items-start gap-3">
+                                            <span className="text-xs text-slate-400 flex-shrink-0 mt-1">Environments</span>
+                                            <div className="flex flex-wrap gap-1.5 justify-end">
+                                                {getDeployedEnvironments().length > 0 ? (
+                                                    getDeployedEnvironments().map((env) => (
+                                                        <span key={env} className="text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                                                            {env}
+                                                        </span>
+                                                    ))
+                                                ) : (
+                                                    <span className="text-sm text-slate-500">Not deployed</span>
+                                                )}
+                                            </div>
                                         </div>
                                         {/* <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Latest Revision</span>
@@ -2122,11 +2283,29 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                         </div>
                                     </div>
                                     <div className="p-5 space-y-3">
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs text-slate-400">API URL</span>
-                                            <span className="text-sm text-white text-right max-w-[60%] break-all">
-                                                {getProxyUrl() || '—'}
-                                            </span>
+                                        <div className="flex justify-between items-start gap-3">
+                                            <span className="text-xs text-slate-400 flex-shrink-0 mt-1">API URL</span>
+                                            <div className="flex flex-col items-end gap-1.5 max-w-[65%]">
+                                                {getApiUrls().length > 0 ? (
+                                                    getApiUrls().map(({ environment, url }) => (
+                                                        <div key={environment} className="flex items-center gap-2 justify-end">
+                                                            <span className="text-[10px] uppercase tracking-wide bg-[#2a3550] text-slate-300 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                                                {environment}
+                                                            </span>
+                                                            <a
+                                                                href={url}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="text-sm text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
+                                                            >
+                                                                {url}
+                                                            </a>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <span className="text-sm text-slate-500">Not deployed</span>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Base Path</span>
@@ -2211,7 +2390,14 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                     </div>
                                 </div> */}
                             </div>
-                            <ResourceAuditDetails audit={proxyDetails.audit} />
+                            <ResourceAuditDetails
+                                audit={proxyDetails.audit}
+                                revisions={proxyDetails.revisions}
+                                latestRevision={proxyDetails.proxy?.latestRevisionId}
+                                showSourceStatus={false}
+                                showCreatorModifier={false}
+                                showAuditDates={false}
+                            />
 
                             {/* ---- Deployments Section (Card style) ---- */}
                             <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">
@@ -2233,6 +2419,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                 <th className="text-left p-3 text-[#5a6a8a] font-medium">Deployment Type</th>
                                                 <th className="text-left p-3 text-[#5a6a8a] font-medium">Deployed At</th>
                                                 <th className="text-left p-3 text-[#5a6a8a] font-medium">Status</th>
+                                                <th className="text-left p-3 text-[#5a6a8a] font-medium">URL</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -2252,14 +2439,145 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                                 <div className="w-1.5 h-1.5 rounded-full bg-green-400" /> Active
                                                             </span>
                                                         </td>
+                                                        <td className="p-3">
+                                                            {getDeploymentUrl(dep) ? (
+                                                                <a
+                                                                    href={getDeploymentUrl(dep)}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
+                                                                >
+                                                                    {getDeploymentUrl(dep)}
+                                                                </a>
+                                                            ) : '—'}
+                                                        </td>
                                                     </tr>
                                                 ))
                                             ) : (
                                                 <tr>
-                                                    <td colSpan="5" className="p-8 text-center text-slate-400">
+                                                    <td colSpan="6" className="p-8 text-center text-slate-400">
                                                         <Archive className="h-8 w-8 mx-auto mb-2 text-slate-600" />
                                                         <p>No deployments found</p>
                                                         <p className="text-xs mt-1">Deploy a revision to see it here</p>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* ---- Proxy Endpoints Section (parsed from the revision bundle) ---- */}
+                            <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">
+                                <div className="px-5 pt-5 pb-3 border-b border-[#2a3550] bg-[#0f172a]/50 flex justify-between items-center flex-wrap gap-3">
+                                    <div className="flex items-center gap-2">
+                                        <Network className="h-4 w-4 text-[#ff8a5c]" />
+                                        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Proxy Endpoints</h3>
+                                    </div>
+                                    {proxyEndpoints.length > 0 && (
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={expandAllEndpoints} className="text-xs px-2.5 py-1 rounded-md border border-[#2a3550] text-slate-300 hover:bg-[#1a1f2e]">Expand All</button>
+                                            <button onClick={collapseAllEndpoints} className="text-xs px-2.5 py-1 rounded-md border border-[#2a3550] text-slate-300 hover:bg-[#1a1f2e]">Collapse All</button>
+                                        </div>
+                                    )}
+                                </div>
+                                {loadingEndpointDetails ? (
+                                    <div className="p-8 text-center text-slate-400">
+                                        <Loader2 className="h-6 w-6 mx-auto mb-2 animate-spin" />
+                                        <p>Reading proxy bundle…</p>
+                                    </div>
+                                ) : proxyEndpoints.length === 0 ? (
+                                    <div className="p-8 text-center text-slate-400">
+                                        <Network className="h-8 w-8 mx-auto mb-2 text-slate-600" />
+                                        <p>No proxy endpoints found</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-[#1f2840]">
+                                        {proxyEndpoints.map((ep) => {
+                                            const isOpen = !!expandedEndpoints[ep.name];
+                                            return (
+                                                <div key={ep.name}>
+                                                    <button
+                                                        onClick={() => toggleEndpointExpanded(ep.name)}
+                                                        className="w-full flex items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#1a1f2e]/50 transition"
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            {isOpen ? <ChevronUp className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />}
+                                                            <span className="font-mono text-sm text-white truncate">{ep.name}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-6 text-xs text-slate-400 shrink-0">
+                                                            <span className="font-mono text-slate-300">{ep.basePath}</span>
+                                                            <span>{ep.targetEndpoints.length > 0 ? ep.targetEndpoints.join(', ') : 'none'}</span>
+                                                        </div>
+                                                    </button>
+                                                    {isOpen && (
+                                                        <div className="px-5 pb-4">
+                                                            <table className="w-full text-sm rounded-lg overflow-hidden border border-[#2a3550]">
+                                                                <thead className="bg-[#1a1f2e] border-b border-[#2a3550]">
+                                                                    <tr>
+                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Endpoint Flow Name</th>
+                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Method</th>
+                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Path / Condition</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    {ep.flows.map((flow, idx) => (
+                                                                        <tr key={`${flow.name}-${idx}`} className="border-b border-[#1f2840] last:border-b-0">
+                                                                            <td className="p-2.5 text-slate-200">{flow.name}</td>
+                                                                            <td className="p-2.5">
+                                                                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                                                                                    flow.method === 'GET' ? 'bg-blue-500/20 text-blue-300'
+                                                                                    : flow.method === 'POST' ? 'bg-emerald-500/20 text-emerald-300'
+                                                                                    : flow.method === 'PUT' || flow.method === 'PATCH' ? 'bg-amber-500/20 text-amber-300'
+                                                                                    : flow.method === 'DELETE' ? 'bg-red-500/20 text-red-300'
+                                                                                    : flow.method === 'ALL' ? 'bg-orange-500/20 text-orange-300'
+                                                                                    : 'bg-slate-500/20 text-slate-300'
+                                                                                }`}>{flow.method}</span>
+                                                                            </td>
+                                                                            <td className="p-2.5 font-mono text-xs text-slate-400">{flow.path}</td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* ---- Target Endpoints Section (parsed from the revision bundle) ---- */}
+                            <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">
+                                <div className="px-5 pt-5 pb-3 border-b border-[#2a3550] bg-[#0f172a]/50 flex items-center gap-2">
+                                    <Globe className="h-4 w-4 text-[#ff8a5c]" />
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-300">Target Endpoints</h3>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-[#1a1f2e] border-b border-[#2a3550]">
+                                            <tr>
+                                                <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
+                                                <th className="text-left p-3 text-[#5a6a8a] font-medium">Target</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {targetEndpointsList.length > 0 ? (
+                                                targetEndpointsList.map((te) => (
+                                                    <tr key={te.name} className="border-b border-[#1f2840] hover:bg-[#1a1f2e]/50 transition">
+                                                        <td className="p-3 font-mono text-white">{te.name}</td>
+                                                        <td className="p-3 font-mono text-xs text-slate-400 break-all">
+                                                            {te.url || (te.targetServer ? `Backend Service: ${te.targetServer}` : '—')}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            ) : (
+                                                <tr>
+                                                    <td colSpan="2" className="p-8 text-center text-slate-400">
+                                                        <Globe className="h-8 w-8 mx-auto mb-2 text-slate-600" />
+                                                        <p>No target endpoints found</p>
                                                     </td>
                                                 </tr>
                                             )}

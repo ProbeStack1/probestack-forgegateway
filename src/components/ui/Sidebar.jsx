@@ -36,9 +36,9 @@ const gatewayGroups = [
     icon: ServerIcon,
     color: '#ff5b1f',
     items: [
-      { label: 'API',      gateway: 'ForgeSphere Gateway', resource: 'Proxy',           path: '/fs-gateway-generate', onboarding: true },
-      { label: 'Function', gateway: 'ForgeSphere Gateway', resource: 'Shared Function', path: '/fs-gateway-generate', onboarding: true },
-      { label: 'Config',          path: '/fs-gateway/config' },
+      { label: 'APIs',             gateway: 'ForgeSphere Gateway', resource: 'Proxy',           path: '/fs-gateway-generate', onboarding: true },
+      { label: 'Global Functions', gateway: 'ForgeSphere Gateway', resource: 'Shared Function', path: '/fs-gateway-generate', onboarding: true },
+      { label: 'Config',           path: '/fs-gateway/config' },
     ],
   },
   {

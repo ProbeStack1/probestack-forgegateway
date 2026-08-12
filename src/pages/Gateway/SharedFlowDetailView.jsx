@@ -9,6 +9,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { fetchApigeeToken } from "../../services/apigeeToken";
+import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import ResourceAuditDetails from './ResourceAuditDetails';
 
 export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
@@ -23,6 +24,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
   const [deployRevision, setDeployRevision] = useState("");
   const [deployEnv, setDeployEnv] = useState("");
   const [deploying, setDeploying] = useState(false);
+  const [deletingSharedFlow, setDeletingSharedFlow] = useState(false);
   const [expandedPoliciesRev, setExpandedPoliciesRev] = useState(null);
   const [policySearch, setPolicySearch] = useState("");
 
@@ -72,11 +74,12 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
     setDeploying(true);
     try {
       const token = await fetchApigeeToken();
-      const url = `https://apigee.googleapis.com/v1/organizations/gen-ai-poc-onboarding/environments/${deployEnv}/sharedflows/${sharedFlow.name}/revisions/${deployRevision}/deployments`;
+      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments/${deployEnv}/sharedflows/${sharedFlow.name}/revisions/${deployRevision}/deployments?override=true`;
+      const trackingHeaders = getTrackingHeaders({ onboardingId: "gen-ai-poc-onboarding" });
       const response = await fetch(url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ override: true }),
+        headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
       });
       if (response.ok) {
         showMessage(`Revision ${deployRevision} deployed to ${deployEnv}`, "success");
@@ -93,12 +96,52 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
     }
   };
 
+  const handleDeleteSharedFlow = async () => {
+    if (!window.confirm(`Delete function "${sharedFlow.name}"? This cannot be undone.`)) return;
+    setDeletingSharedFlow(true);
+    try {
+      const token = await fetchApigeeToken();
+      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}`;
+      const trackingHeaders = getTrackingHeaders({ onboardingId: "gen-ai-poc-onboarding" });
+      delete trackingHeaders["Content-Type"];
+      const response = await fetch(url, {
+        method: "DELETE",
+        headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(await response.text());
+      showMessage(`Function "${sharedFlow.name}" deleted.`, "success");
+      onBack();
+    } catch (err) {
+      showMessage(`Delete failed: ${err.message}`, "error");
+    } finally {
+      setDeletingSharedFlow(false);
+    }
+  };
+
   // Helper: safely extract data from fetched details or fallback to list data
   const getMeta = () => sharedFlowDetails?.sharedFlowDetails?.metaData || {};
   const getLatestRevision = () => sharedFlowDetails?.sharedFlowDetails?.latestRevisionId || sharedFlow.latestRevision;
   const getRevisionsList = () => sharedFlowDetails?.revisions || sharedFlow.revisions || [];
   const getRevisionDetails = () => sharedFlowDetails?.revisionDetails || [];
   const getDeployments = () => sharedFlowDetails?.deployments?.deployments || [];
+  const getBasePath = () => {
+    const latestRevDetail = getRevisionDetails().find((rd) => rd.revision === getLatestRevision());
+    return latestRevDetail?.data?.basepaths?.[0] || "/";
+  };
+  // Apigee's eval/trial default runtime hostname pattern — same convention used on the APIs page.
+  const getDeploymentUrl = (dep) => {
+    if (!dep?.environment) return null;
+    const basePath = getBasePath();
+    return `https://gen-ai-poc-onboarding-${dep.environment}.apigee.net${basePath === "/" ? "" : basePath}`;
+  };
+  const getFunctionUrls = () => {
+    return getDeployments()
+      .map((dep) => ({ environment: dep.environment, url: getDeploymentUrl(dep) }))
+      .filter((entry) => entry.url);
+  };
+  const getDeployedEnvironments = () => {
+    return [...new Set(getDeployments().map((dep) => dep.environment).filter(Boolean))].sort();
+  };
   const formatDate = (ts) => {
     const raw = ts ?? sharedFlow.lastModifiedAt;
     if (!raw) return "—";
@@ -179,10 +222,11 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
               Duplicate
             </button>
             <button
-              onClick={() => showMessage("Delete feature coming soon", "info")}
-              className="px-4 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded-md text-sm hover:bg-red-500/20"
+              onClick={handleDeleteSharedFlow}
+              disabled={deletingSharedFlow}
+              className="px-4 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded-md text-sm hover:bg-red-500/20 disabled:opacity-50"
             >
-              Delete
+              {deletingSharedFlow ? "Deleting..." : "Delete"}
             </button>
           </div>
         </div>
@@ -240,6 +284,44 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                       {(sharedFlowDetails?.source || sharedFlow.source) === "DIRECT_MANAGEMENT_API" ? "API Hub" : "ForgeSphere"}
                     </span>
                   </div>
+                  <div className="flex justify-between items-start gap-3">
+                    <span className="text-xs text-slate-400 flex-shrink-0 mt-1">Environments</span>
+                    <div className="flex flex-wrap gap-1.5 justify-end">
+                      {getDeployedEnvironments().length > 0 ? (
+                        getDeployedEnvironments().map((env) => (
+                          <span key={env} className="text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                            {env}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-500">Not deployed</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-start gap-3">
+                    <span className="text-xs text-slate-400 flex-shrink-0 mt-1">Function URL</span>
+                    <div className="flex flex-col items-end gap-1.5 max-w-[65%]">
+                      {getFunctionUrls().length > 0 ? (
+                        getFunctionUrls().map(({ environment, url }) => (
+                          <div key={environment} className="flex items-center gap-2 justify-end">
+                            <span className="text-[10px] uppercase tracking-wide bg-[#2a3550] text-slate-300 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                              {environment}
+                            </span>
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
+                            >
+                              {url}
+                            </a>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-500">Not deployed</span>
+                      )}
+                    </div>
+                  </div>
                   <div className="flex justify-between items-center">
                     <span className="text-xs text-slate-400">Created At</span>
                     <span className="text-sm text-slate-300">{formatDate(sharedFlowDetails?.audit?.registry?.createdAt || getMeta().createdAt)}</span>
@@ -279,6 +361,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                         <th className="text-left p-3 text-[#5a6a8a] font-medium">Deployment Type</th>
                         <th className="text-left p-3 text-[#5a6a8a] font-medium">Deployed At</th>
                         <th className="text-left p-3 text-[#5a6a8a] font-medium">Status</th>
+                        <th className="text-left p-3 text-[#5a6a8a] font-medium">URL</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -298,11 +381,24 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                                 <div className="w-1.5 h-1.5 rounded-full bg-green-400" /> Active
                               </span>
                             </td>
+                            <td className="p-3">
+                              {getDeploymentUrl(dep) ? (
+                                <a
+                                  href={getDeploymentUrl(dep)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
+                                >
+                                  {getDeploymentUrl(dep)}
+                                </a>
+                              ) : "—"}
+                            </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="5" className="p-8 text-center text-slate-400">
+                          <td colSpan="6" className="p-8 text-center text-slate-400">
                             <Archive className="h-8 w-8 mx-auto mb-2 text-slate-600" />
                             <p>No deployments found</p>
                             <p className="text-xs mt-1">Deploy a revision to see it here</p>
@@ -314,7 +410,14 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
                 </div>
               </div>
             </div>
-            <ResourceAuditDetails audit={sharedFlowDetails?.audit} />
+            <ResourceAuditDetails
+              audit={sharedFlowDetails?.audit}
+              revisions={getRevisionsList()}
+              latestRevision={getLatestRevision()}
+              showSourceStatus={false}
+              showCreatorModifier={false}
+              showAuditDates={false}
+            />
 
             {/* Revisions Section – matches ProxyDetailView exactly */}
             <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] rounded-2xl border border-[#2a3550] shadow-xl overflow-hidden">

@@ -3,11 +3,12 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
     Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2,
-    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2
+    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import { fetchApigeeToken } from "../../services/apigeeToken";
+import { fetchApigeeBreakdown } from "../../services/apigeeStatsService";
 import { GatewayContextSelector } from "./GatewayContextSelector";
 import JSZip from "jszip";
 import { PaginationControls } from "../../components/ui/PaginationControls";
@@ -38,6 +39,11 @@ export const ProxiesView = ({ showMessage }) => {
     // Pagination
     const [proxyPage, setProxyPage] = useState(1);
     const [proxyPageSize, setProxyPageSize] = useState(10);
+
+    // Traffic column (per-proxy request count over a selectable time range)
+    const [trafficRange, setTrafficRange] = useState("1 day");
+    const [trafficByProxy, setTrafficByProxy] = useState({});
+    const [trafficLoading, setTrafficLoading] = useState(false);
 
     // Create Proxy Modal State
     const [createProxyModal, setCreateProxyModal] = useState({
@@ -391,6 +397,32 @@ export const ProxiesView = ({ showMessage }) => {
         if (selectedOrg) fetchProxies();
     }, [selectedOrg]);
 
+    // Fetch traffic (request counts) per proxy for the selected environment + time range.
+    // Requires a concrete environment — analytics can't be aggregated across "All Environments".
+    const fetchProxyTraffic = async () => {
+        if (!selectedEnv || selectedEnv === "ALL" || selectedEnv === "NOT_DEPLOYED") {
+            setTrafficByProxy({});
+            return;
+        }
+        setTrafficLoading(true);
+        try {
+            const token = await fetchApigeeToken();
+            const rows = await fetchApigeeBreakdown(token, selectedEnv, "apiproxy", ["sum(message_count)"], trafficRange);
+            const map = {};
+            rows.forEach((row) => { map[row.name] = row["sum(message_count)"] || 0; });
+            setTrafficByProxy(map);
+        } catch (err) {
+            console.error("Failed to fetch proxy traffic:", err);
+            setTrafficByProxy({});
+        } finally {
+            setTrafficLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchProxyTraffic();
+    }, [selectedEnv, trafficRange]);
+
     // Fetch BU team name when selectedBU changes so we can build the proxy-name prefix
     useEffect(() => {
         if (!selectedBU) { setBuLabel(""); return; }
@@ -531,6 +563,19 @@ export const ProxiesView = ({ showMessage }) => {
         if (!type) return "Rest";
         if (type === "REST") return "Rest";
         return type;
+    };
+
+    // "3 days ago" style label alongside the full last-modified timestamp
+    const formatRelativeTime = (dateStr) => {
+        if (!dateStr) return "";
+        const diffMs = Date.now() - new Date(dateStr).getTime();
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        if (diffMins < 1) return "just now";
+        if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? "" : "s"} ago`;
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+        const diffDays = Math.floor(diffHours / 24);
+        return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
     };
 
     // Generate proxy zip (unchanged)
@@ -822,11 +867,19 @@ export const ProxiesView = ({ showMessage }) => {
                 throw new Error(errorText || `Upload failed with status ${response.status}`);
             }
 
+            // Persist the API type the user actually picked (Rest/SOAP/GraphQL/MCP) — Apigee's own
+            // "apiProxyType" on a bundle-imported proxy is always "PROGRAMMABLE" and isn't useful here.
+            const selectedApiType = { Rest: "REST", SOAP: "SOAP", GraphQL: "GraphQL", MCP: "MCP" }[modal.apiType] || modal.apiType;
             const createdApi = await response.clone().json().catch(() => ({ name: modal.name }));
             await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
                 method: "POST",
                 headers: getTrackingHeaders({ onboardingId: defaultOnboardingId, microserviceId: defaultMicroserviceId }),
-                body: JSON.stringify({ operation: "CREATE", requestPayload: { name: modal.name }, afterSnapshot: createdApi, responsePayload: createdApi }),
+                body: JSON.stringify({
+                    operation: "CREATE",
+                    requestPayload: { name: modal.name, apiType: selectedApiType },
+                    afterSnapshot: { ...createdApi, apiType: selectedApiType },
+                    responsePayload: createdApi,
+                }),
             });
 
             showMessage(`API "${modal.name}" created successfully!`, "success");
@@ -995,7 +1048,7 @@ export const ProxiesView = ({ showMessage }) => {
             <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
             {/* ... header and filters (unchanged) ... */}
             <div className="flex justify-between items-center flex-wrap gap-3">
-                <h2 className="text-2xl font-bold text-white mb-1">API</h2>
+                <h2 className="text-2xl font-bold text-white mb-1">APIs</h2>
                 <GatewayContextSelector
                     selectedOrg={selectedOrg}
                     setSelectedOrg={setSelectedOrg}
@@ -1062,8 +1115,27 @@ export const ProxiesView = ({ showMessage }) => {
                                 <tr>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Type</th>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">Environment</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">
+                                        <div className="flex items-center gap-2">
+                                            <span>Traffic</span>
+                                            <div className="relative">
+                                                <select
+                                                    value={trafficRange}
+                                                    onChange={(e) => setTrafficRange(e.target.value)}
+                                                    className="h-6 pl-1.5 pr-5 text-[10px] font-normal normal-case rounded border border-[#2a3550] bg-[#1a1f2e] text-[#7f8fa8] focus:outline-none focus:border-primary appearance-none cursor-pointer"
+                                                >
+                                                    <option value="1 hour">1H</option>
+                                                    <option value="6 hours">6H</option>
+                                                    <option value="1 day">24H</option>
+                                                    <option value="7 days">7D</option>
+                                                    <option value="14 days">14D</option>
+                                                </select>
+                                                <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-[#5a6a8a] pointer-events-none" />
+                                            </div>
+                                        </div>
+                                    </th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Last Modified</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">Modified By</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Source</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Actions</th>
                                 </tr>
@@ -1082,32 +1154,44 @@ export const ProxiesView = ({ showMessage }) => {
                                             </span>
                                         </td>
                                         <td className="p-3 text-[#7f8fa8]">
-                                            {proxy.environmentSummary || (proxy.environments?.length ? proxy.environments.join(", ") : "Not deployed")}
+                                            {trafficLoading
+                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                : (selectedEnv === "ALL" || selectedEnv === "NOT_DEPLOYED")
+                                                    ? <span className="text-xs text-[#5a6a8a]">Select an environment</span>
+                                                    : (trafficByProxy[proxy.name] ?? 0).toLocaleString()}
                                         </td>
                                         <td className="p-3 text-[#7f8fa8]">
-                                            {proxy.lastModifiedAt ? new Date(proxy.lastModifiedAt).toLocaleDateString() : "—"}
+                                            {proxy.lastModifiedAt ? (
+                                                <div className="flex flex-col">
+                                                    <span>{new Date(proxy.lastModifiedAt).toLocaleString()}</span>
+                                                    <span className="text-xs text-[#5a6a8a]">{formatRelativeTime(proxy.lastModifiedAt)}</span>
+                                                </div>
+                                            ) : "—"}
+                                        </td>
+                                        <td className="p-3 text-[#7f8fa8]">
+                                            {proxy.updatedBy || proxy.lastModifiedBy || proxy.audit?.registry?.updatedBy || "—"}
                                         </td>
                                         <td className="p-3">
                                             {proxy.source === "LIFECYCLE_TOOL" ? (
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-emerald-500/40 bg-emerald-500/10 text-emerald-300">ForgeSphere</span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">Api Hub</span>
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">API Hub</span>
                                             )}
                                         </td>
                                         <td className="p-3">
                                             <div className="flex items-center gap-2">
                                                 <button onClick={(e) => { e.stopPropagation(); handleProxySelect(proxy); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="View details"><Eye className="h-4 w-4" /></button>
+                                                <button onClick={(e) => { e.stopPropagation(); openProxyEditor(proxy.name); }} className="text-violet-400 hover:text-violet-300" title="Open in Proxy Editor"><FileCode2 className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage(`Clone ${proxy.name} feature coming soon`, "info"); }} className="text-emerald-400 hover:text-emerald-300" title="Clone"><Copy className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage(`Version management for ${proxy.name} coming soon`, "info"); }} className="text-amber-400 hover:text-amber-300" title="Versioning"><GitBranch className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage(`Deprecate ${proxy.name} feature coming soon`, "info"); }} className="text-orange-400 hover:text-orange-500" title="Deprecate"><ArchiveIcon className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage("Admin role is required to delete an API", "info"); }} className="text-red-400 hover:text-red-500" title="Delete"><Trash2Icon className="h-4 w-4" /></button>
-                                                <button onClick={(e) => { e.stopPropagation(); openProxyEditor(proxy.name); }} className="text-violet-400 hover:text-violet-300" title="Open in Proxy Editor"><FileCode2 className="h-4 w-4" /></button>
                                             </div>
                                         </td>
                                     </tr>
                                 ))}
                                 {paginatedProxies.length === 0 && (
-                                    <tr><td colSpan="6" className="p-6 text-center text-[#7f8fa8]">No APIs found.</td></tr>
+                                    <tr><td colSpan="7" className="p-6 text-center text-[#7f8fa8]">No APIs found.</td></tr>
                                 )}
                             </tbody>
                         </table>
@@ -2344,7 +2428,7 @@ export const ProxiesView = ({ showMessage }) => {
 //                                             {proxy.source === "LIFECYCLE_TOOL" ? (
 //                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-emerald-500/40 bg-emerald-500/10 text-emerald-300">ForgeSphere</span>
 //                                             ) : (
-//                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">Api Hub</span>
+//                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">API Hub</span>
 //                                             )}
 //                                         </td>
 //                                         <td className="p-3">

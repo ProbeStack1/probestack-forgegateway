@@ -397,14 +397,14 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                   onClick={() => selectSidebarMenu("api-proxies")}
                 >
                   <Layout className={sidebarIconClass(selectedMenuItem === "api-proxies", "text-sky-400")} />
-                  {!sidebarCollapsed && <span>API</span>}
+                  {!sidebarCollapsed && <span>APIs</span>}
                 </div>
                 <div
                   className={sidebarItemClass(selectedMenuItem === "shared-flows")}
                   onClick={() => selectSidebarMenu("shared-flows")}
                 >
                   <Share2 className={sidebarIconClass(selectedMenuItem === "shared-flows", "text-emerald-400")} />
-                  {!sidebarCollapsed && <span>Function</span>}
+                  {!sidebarCollapsed && <span>Global Functions</span>}
                 </div>
               </div>
             )}
@@ -429,21 +429,21 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                   onClick={() => selectSidebarMenu("api-products")}
                 >
                   <Package className={sidebarIconClass(selectedMenuItem === "api-products", "text-amber-300")} />
-                  {!sidebarCollapsed && <span>Product</span>}
+                  {!sidebarCollapsed && <span>Products</span>}
                 </div>
                 <div
                   className={sidebarItemClass(selectedMenuItem === "consumer")}
                   onClick={() => selectSidebarMenu("consumer")}
                 >
                   <AppWindow className={sidebarIconClass(selectedMenuItem === "consumer", "text-rose-400")} />
-                  {!sidebarCollapsed && <span>Consumer</span>}
+                  {!sidebarCollapsed && <span>Consumers</span>}
                 </div>
                 <div
                   className={sidebarItemClass(selectedMenuItem === "developer")}
                   onClick={() => selectSidebarMenu("developer")}
                 >
                   <PersonStanding className={sidebarIconClass(selectedMenuItem === "developer", "text-teal-400")} />
-                  {!sidebarCollapsed && <span>Developer</span>}
+                  {!sidebarCollapsed && <span>Developers</span>}
                 </div>
               </div>
             )}

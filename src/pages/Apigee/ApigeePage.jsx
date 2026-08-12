@@ -341,7 +341,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
 
   const renderSourceBadge = (source) => {
     const normalizedSource = source === "PLATFORM" ? "PLATFORM" : "DIRECT_MANAGEMENT_API";
-    const label = normalizedSource === "PLATFORM" ? "ForgeSphere" : "Api Hub";
+    const label = normalizedSource === "PLATFORM" ? "ForgeSphere" : "API Hub";
     const className = normalizedSource === "PLATFORM"
       ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
       : "border-amber-500/40 bg-amber-500/10 text-amber-300";

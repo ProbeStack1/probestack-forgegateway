@@ -60,12 +60,13 @@ export const getTimeRangeMs = (timeRange) => {
 };
 
 // --- Extract a metric's numeric time series from an Apigee stats response ---
-// Real response shape: { environments: [{ dimensions: [{ metrics: [{ name, values: [{timestamp, value}] }] }] }] }
+// Shape varies by call: time-series calls (timeUnit set) return `values: [{timestamp, value}]`;
+// breakdown calls (no timeUnit, one row per dimension value) return bare `values: ["2"]`.
 export const getMetricSeries = (metricsArr, expectedName, indexFallback = 0) => {
   if (!Array.isArray(metricsArr)) return [];
   const match = metricsArr.find((m) => m.name === expectedName) || metricsArr[indexFallback];
   if (!match || !Array.isArray(match.values)) return [];
-  return match.values.map((v) => parseFloat(v.value) || 0);
+  return match.values.map((v) => parseFloat(v && typeof v === "object" ? v.value : v) || 0);
 };
 
 export const sumSeries = (arr) => (Array.isArray(arr) ? arr.reduce((a, b) => a + b, 0) : 0);

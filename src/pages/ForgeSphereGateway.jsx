@@ -3778,7 +3778,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //                                                     </span>
 //                                                 ) : (
 //                                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">
-//                                                         Api Hub
+//                                                         API Hub
 //                                                     </span>
 //                                                 )}
 //                                             </td>
@@ -3932,7 +3932,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //                                                     </span>
 //                                                 ) : (
 //                                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">
-//                                                         Api Hub
+//                                                         API Hub
 //                                                     </span>
 //                                                 )}
 //                                             </td>

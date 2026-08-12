@@ -1,6 +1,7 @@
 // src/components/Gateway/SharedFlowsView.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import JSZip from "jszip";
 import { Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2, AlertCircle, Trash2Icon, FileCode2 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { GatewayContextSelector } from "./GatewayContextSelector";
@@ -18,6 +19,7 @@ export const SharedFlowsView = ({ showMessage }) => {
     const [loadingSharedFlows, setLoadingSharedFlows] = useState(false);
     const [sharedFlowsError, setSharedFlowsError] = useState(null);
     const [createModalOpen, setCreateModalOpen] = useState({ open: false, name: "", description: "" });
+    const [creatingSharedFlow, setCreatingSharedFlow] = useState(false);
     const [selectedOrg, setSelectedOrg] = useState("");
     const [selectedBU, setSelectedBU] = useState("");
     const [selectedEnv, setSelectedEnv] = useState("");
@@ -26,6 +28,19 @@ export const SharedFlowsView = ({ showMessage }) => {
 
     const openSharedFlowDetail = (sf) => {
         navigate(`${sfBasePath}/shared-flow/${sf.name}`, { state: { sharedFlow: sf } });
+    };
+
+    // "3 days ago" style label alongside the full last-modified timestamp — matches the APIs page
+    const formatRelativeTime = (dateStr) => {
+        if (!dateStr) return "";
+        const diffMs = Date.now() - new Date(dateStr).getTime();
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        if (diffMins < 1) return "just now";
+        if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? "" : "s"} ago`;
+        const diffHours = Math.floor(diffMins / 60);
+        if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+        const diffDays = Math.floor(diffHours / 24);
+        return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
     };
 
     useEffect(() => {
@@ -101,27 +116,74 @@ export const SharedFlowsView = ({ showMessage }) => {
         }
     };
 
+    const generateSharedFlowZip = async (name, description) => {
+        const zip = new JSZip();
+        const bundleRoot = zip.folder("sharedflowbundle");
+        bundleRoot.file(
+            `${name}.xml`,
+            `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SharedFlowBundle revision="1" name="${name}">
+  <ConfigurationVersion majorVersion="4" minorVersion="0"/>
+  <CreatedAt>${Date.now()}</CreatedAt>
+  <Description>${description || ""}</Description>
+  <SharedFlows>
+    <SharedFlow>default</SharedFlow>
+  </SharedFlows>
+</SharedFlowBundle>`
+        );
+        bundleRoot.folder("sharedflows").file(
+            "default.xml",
+            `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<SharedFlow name="default">
+  <Description>${description || ""}</Description>
+</SharedFlow>`
+        );
+        const content = await zip.generateAsync({ type: "blob" });
+        return new File([content], `${name}.zip`, { type: "application/zip" });
+    };
+
     const handleCreateSharedFlow = async () => {
-        if (!createModalOpen.name.trim()) {
+        const name = createModalOpen.name.trim();
+        if (!name) {
             showMessage("Function name is required.", "error");
             return;
         }
-        // TODO: Call your API to create the shared flow
-        const actorContext = { onboardingId: selectedOrg || "gateway" };
-        await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(selectedOrg)}/config-audit/SHARED_FLOW/${encodeURIComponent(createModalOpen.name)}/record`, {
-            method: "POST",
-            headers: getTrackingHeaders(actorContext),
-            body: JSON.stringify({ operation: "CREATE", requestPayload: createModalOpen, afterSnapshot: createModalOpen }),
-        });
-        showMessage(`Function "${createModalOpen.name}" created successfully!`, "success");
-        setCreateModalOpen({ open: false, name: "", description: "" });
-        fetchSharedFlows(); // refresh list
+        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+        if (!effectiveOrg) {
+            showMessage("Select an organization before creating a function.", "error");
+            return;
+        }
+        setCreatingSharedFlow(true);
+        try {
+            const token = await fetchApigeeToken();
+            const zipFile = await generateSharedFlowZip(name, createModalOpen.description);
+            const formData = new FormData();
+            formData.append("file", zipFile);
+            const trackingHeaders = getTrackingHeaders({ onboardingId: selectedOrg });
+            delete trackingHeaders["Content-Type"];
+            const response = await fetch(
+                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/sharedflows?action=import&name=${encodeURIComponent(name)}`,
+                {
+                    method: "POST",
+                    headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },
+                    body: formData,
+                }
+            );
+            if (!response.ok) throw new Error(await response.text());
+            showMessage(`Function "${name}" created successfully!`, "success");
+            setCreateModalOpen({ open: false, name: "", description: "" });
+            fetchSharedFlows(); // refresh list
+        } catch (err) {
+            showMessage(`Could not create function: ${err.message}`, "error");
+        } finally {
+            setCreatingSharedFlow(false);
+        }
     };
 
     return (
         <div className="flex flex-col gap-4 p-6">
             <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
-            <h2 className="text-2xl font-bold text-white mb-1">Function</h2>
+            <h2 className="text-2xl font-bold text-white mb-1">Global Functions</h2>
             <div className="flex justify-between items-center">
                 <GatewayContextSelector
                     selectedOrg={selectedOrg}
@@ -169,8 +231,8 @@ export const SharedFlowsView = ({ showMessage }) => {
                             <thead className="bg-dark-800/70 border-b border-dark-700">
                                 <tr>
                                     <th className="text-left p-3 text-[#5a6a8a]">Name</th>
-                                    <th className="text-left p-3 text-[#5a6a8a]">Environment</th>
                                     <th className="text-left p-3 text-[#5a6a8a]">Last Modified</th>
+                                    <th className="text-left p-3 text-[#5a6a8a]">Modified By</th>
                                     <th className="text-left p-3 text-[#5a6a8a]">Source</th>
                                     <th className="text-left p-3 text-[#5a6a8a]">Actions</th>
                                 </tr>
@@ -184,10 +246,15 @@ export const SharedFlowsView = ({ showMessage }) => {
                                     >
                                         <td className="p-3 text-white font-mono text-sm">{sf.name}</td>
                                         <td className="p-3 text-[#7f8fa8]">
-                                            {sf.environmentSummary || (sf.environments?.length ? sf.environments.join(", ") : "Not deployed")}
+                                            {sf.lastModifiedAt ? (
+                                                <div className="flex flex-col">
+                                                    <span>{new Date(sf.lastModifiedAt).toLocaleString()}</span>
+                                                    <span className="text-xs text-[#5a6a8a]">{formatRelativeTime(sf.lastModifiedAt)}</span>
+                                                </div>
+                                            ) : "—"}
                                         </td>
                                         <td className="p-3 text-[#7f8fa8]">
-                                            {sf.lastModifiedAt ? new Date(sf.lastModifiedAt).toLocaleDateString() : "—"}
+                                            {sf.updatedBy || sf.lastModifiedBy || "—"}
                                         </td>
                                         <td className="p-3">
                                             {sf.source === "LIFECYCLE_TOOL" ? (
@@ -196,7 +263,7 @@ export const SharedFlowsView = ({ showMessage }) => {
                                                 </span>
                                             ) : (
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">
-                                                    Api Hub
+                                                    API Hub
                                                 </span>
                                             )}
                                         </td>
@@ -211,6 +278,16 @@ export const SharedFlowsView = ({ showMessage }) => {
                                                     title="View details"
                                                 >
                                                     <Eye className="h-4 w-4" />
+                                                </button>
+                                                 <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        openSharedFlowEditor(sf.name);
+                                                    }}
+                                                    className="text-violet-400 hover:text-violet-300"
+                                                    title="Open in Editor"
+                                                >
+                                                    <FileCode2 className="h-4 w-4" />
                                                 </button>
                                                 <button
                                                     onClick={(e) => {
@@ -252,16 +329,7 @@ export const SharedFlowsView = ({ showMessage }) => {
                                                 >
                                                     <Trash2Icon className="h-4 w-4" />
                                                 </button>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        openSharedFlowEditor(sf.name);
-                                                    }}
-                                                    className="text-violet-400 hover:text-violet-300"
-                                                    title="Open in Editor"
-                                                >
-                                                    <FileCode2 className="h-4 w-4" />
-                                                </button>
+                                               
                                             </div>
                                         </td>
                                     </tr>
@@ -322,11 +390,11 @@ export const SharedFlowsView = ({ showMessage }) => {
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
-                        <Button variant="outline" onClick={() => setCreateModalOpen({ open: false, name: "", description: "" })}>
+                        <Button variant="outline" onClick={() => setCreateModalOpen({ open: false, name: "", description: "" })} disabled={creatingSharedFlow}>
                             Cancel
                         </Button>
-                        <Button onClick={handleCreateSharedFlow} className="bg-[#ff5b1f] hover:bg-[#ff6b36]">
-                            Create
+                        <Button onClick={handleCreateSharedFlow} className="bg-[#ff5b1f] hover:bg-[#ff6b36]" disabled={creatingSharedFlow}>
+                            {creatingSharedFlow ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create"}
                         </Button>
                     </div>
                 </DialogContent>

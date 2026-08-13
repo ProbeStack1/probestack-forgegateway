@@ -43,6 +43,7 @@ import { useNavigate } from "react-router-dom";
 import ViewSpecModal from "../../components/ViewSpecModal";
 import API_BASE_URL from "../../config/apiConfig";
 import ResourceAuditDetails from './ResourceAuditDetails';
+import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import JSZip from "jszip";
 
 // ── Bundle parsing: read the ProxyEndpoint / TargetEndpoint XML out of a revision's
@@ -1492,7 +1493,10 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
 
                 const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/details`;
                 const response = await fetch(url, {
-                    headers: { 'Authorization': `Bearer ${token}` }
+                    // Tracking headers let the backend opportunistically record who's
+                    // viewing a proxy that has no Created By / Modified By yet (proxies
+                    // made directly in Apigee, outside this platform).
+                    headers: { 'Authorization': `Bearer ${token}`, ...getTrackingHeaders() }
                 });
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);

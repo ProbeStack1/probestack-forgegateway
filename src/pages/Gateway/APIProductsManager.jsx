@@ -3,7 +3,8 @@ import { Search, Edit, Trash2, Plus, ArrowLeft, Loader2, Copy, GitBranch, X, Eye
 import { GatewayContextSelector } from './GatewayContextSelector';
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import ResourceAuditDetails from './ResourceAuditDetails';
-import { getTrackingHeaders } from '../Apigee/components/apigeeTracking';
+import { getTrackingHeaders, getFallbackOnboardingId } from '../Apigee/components/apigeeTracking';
+import { getApplications } from '../../http-service/onboardingApi';
 
 // Helper to fetch Apigee token
 const fetchToken = async () => {
@@ -83,28 +84,22 @@ const APIProductsManager = ({
     setProductPage(1);
   }, [searchTerm]);
 
-  // Fetch business unit application details
+  // Fetch an application under the selected business unit (from the onboarding hierarchy)
   const fetchBusinessUnitApplication = async () => {
     if (!selectedBU) return null;
     setBuAppDetails(prev => ({ ...prev, loading: true }));
     try {
-      const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'https://your-api-gateway.com';
-      const userEmail = localStorage.getItem('userEmail') || 'admin@forgecrux.com';
-      const res = await fetch(`${API_BASE_URL}/gatewayonboarding/api/v1/user/${userEmail}/business-units`);
-      if (res.ok) {
-        const result = await res.json();
-        const buList = result.data?.businessUnits || [];
-        const matchingBU = buList.find(bu => bu.id === selectedBU);
-        if (matchingBU) {
-          const details = {
-            onboardingId: matchingBU.onboardingId,
-            applicationName: matchingBU.applicationName,
-            applicationId: matchingBU.applicationId,
-            loading: false,
-          };
-          setBuAppDetails(details);
-          return details;
-        }
+      const apps = await getApplications({ businessUnitId: selectedBU, size: 1 });
+      const app = apps?.[0];
+      if (app) {
+        const details = {
+          onboardingId: getFallbackOnboardingId(),
+          applicationName: app.name,
+          applicationId: app.id,
+          loading: false,
+        };
+        setBuAppDetails(details);
+        return details;
       }
       setBuAppDetails({ onboardingId: '', applicationName: '', applicationId: '', loading: false });
     } catch (err) {

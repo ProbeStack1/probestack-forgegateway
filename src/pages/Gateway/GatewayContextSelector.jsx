@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import API_BASE_URL from '../../config/apiConfig';
+import { getBusinessUnits, getProjects } from '../../http-service/onboardingApi';
 
 // Helper to fetch Apigee token (no longer needed for env, but kept if other parts use it)
 const fetchToken = async () => {
@@ -23,6 +24,8 @@ export const GatewayContextSelector = ({
     setSelectedOrg,
     selectedBU,
     setSelectedBU,
+    selectedProject: externalSelectedProject,
+    setSelectedProject: externalSetSelectedProject,
     selectedEnv,
     setSelectedEnv,
     showEnv = true,
@@ -32,10 +35,18 @@ export const GatewayContextSelector = ({
     const [organizations, setOrganizations] = useState([]);
     const [environments, setEnvironments] = useState([]);
     const [businessUnits, setBusinessUnits] = useState([]);
+    const [projects, setProjects] = useState([]);
     const [loadingOrgs, setLoadingOrgs] = useState(false);
     const [loadingEnvs, setLoadingEnvs] = useState(false);
     const [loadingBUs, setLoadingBUs] = useState(false);
+    const [loadingProjects, setLoadingProjects] = useState(false);
     const [orgNameToIdMap, setOrgNameToIdMap] = useState({});
+
+    // Project selection is controlled by the parent when it cares (e.g. to filter
+    // Applications elsewhere); otherwise this component tracks it internally.
+    const [internalSelectedProject, setInternalSelectedProject] = useState('');
+    const selectedProject = externalSelectedProject !== undefined ? externalSelectedProject : internalSelectedProject;
+    const setSelectedProject = externalSetSelectedProject || setInternalSelectedProject;
 
     const ALL_ENV = "ALL";
     const NOT_DEPLOYED = "NOT_DEPLOYED";
@@ -70,31 +81,39 @@ export const GatewayContextSelector = ({
         }
     };
 
-    // ---------- Business Units ----------
-    const fetchBusinessUnits = async (orgName) => {
-        if (!orgName) return;
-        const orgId = orgNameToIdMap[orgName];
-        if (!orgId) return;
+    // ---------- Business Units (sourced from the onboarding hierarchy, independent of Gateway Org) ----------
+    const fetchBusinessUnits = async () => {
         setLoadingBUs(true);
         try {
-            const response = await fetch(
-                `${gatewayApiBaseUrl}/gateway-organizations/${orgId}/business-units`
-            );
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
-            if (result.status === 'SUCCESS' && result.data?.businessUnits) {
-                setBusinessUnits(result.data.businessUnits);
-                if (!selectedBU && result.data.businessUnits[0]) {
-                    setSelectedBU(result.data.businessUnits[0].id);
-                }
-            } else {
-                setBusinessUnits([]);
+            const buList = await getBusinessUnits(0, 200);
+            setBusinessUnits(buList || []);
+            if (!selectedBU && buList?.[0]) {
+                setSelectedBU(buList[0].id);
             }
         } catch (err) {
-            console.error('Error fetching BUs:', err);
+            console.error('Error fetching business units:', err);
             setBusinessUnits([]);
         } finally {
             setLoadingBUs(false);
+        }
+    };
+
+    // ---------- Projects for the selected Business Unit ----------
+    const fetchProjects = async (buId) => {
+        if (!buId) { setProjects([]); return; }
+        setLoadingProjects(true);
+        try {
+            const allProjects = await getProjects(0, 200);
+            const scoped = (allProjects || []).filter((p) => p.businessUnitId === buId);
+            setProjects(scoped);
+            if (selectedProject && !scoped.some((p) => p.id === selectedProject)) {
+                setSelectedProject('');
+            }
+        } catch (err) {
+            console.error('Error fetching projects:', err);
+            setProjects([]);
+        } finally {
+            setLoadingProjects(false);
         }
     };
 
@@ -139,18 +158,24 @@ export const GatewayContextSelector = ({
         }
     };
 
-    // Initial load: fetch organizations
+    // Initial load: fetch organizations and business units (business units come
+    // from the onboarding hierarchy and aren't scoped by Gateway Org)
     useEffect(() => {
         fetchOrganizations();
+        fetchBusinessUnits();
     }, []);
 
-    // When org changes, fetch business units AND environment
+    // When org changes, fetch environment (Gateway Org is a separate, Apigee-level concept)
     useEffect(() => {
         if (selectedOrg && orgNameToIdMap[selectedOrg]) {
-            fetchBusinessUnits(selectedOrg);
             if (showEnv) fetchEnvironment(selectedOrg);
         }
     }, [selectedOrg, orgNameToIdMap]);
+
+    // When the Business Unit changes, load its Projects
+    useEffect(() => {
+        fetchProjects(selectedBU);
+    }, [selectedBU]);
 
     // ---------- Reusable select renderer (defensive array check) ----------
     const renderSelect = ({ label, value, onChange, options, loading, disabled, placeholder, getOptionLabel, getOptionValue, minWidth = '180px' }) => {
@@ -209,8 +234,21 @@ export const GatewayContextSelector = ({
                 loading: loadingBUs,
                 disabled: loadingBUs,
                 placeholder: 'Select BU',
-                getOptionLabel: (bu) => bu.teamName,
+                getOptionLabel: (bu) => bu.displayName || bu.name,
                 getOptionValue: (bu) => bu.id,
+                minWidth: '180px',
+            })}
+
+            {renderSelect({
+                label: 'Project',
+                value: selectedProject,
+                onChange: setSelectedProject,
+                options: projects,
+                loading: loadingProjects,
+                disabled: loadingProjects || !selectedBU,
+                placeholder: selectedBU ? 'Select Project' : 'Select a BU first',
+                getOptionLabel: (p) => p.name,
+                getOptionValue: (p) => p.id,
                 minWidth: '180px',
             })}
 

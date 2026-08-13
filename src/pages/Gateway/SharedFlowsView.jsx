@@ -356,7 +356,14 @@ export const SharedFlowsView = ({ showMessage }) => {
             </div>
             {/* Create Shared Flow Modal */}
             {/* Create Shared Flow Modal */}
-            <Dialog open={createModalOpen.open} onOpenChange={(open) => setCreateModalOpen(prev => ({ ...prev, open }))}>
+            <Dialog open={createModalOpen.open} onOpenChange={(open) => {
+                if (open) {
+                    setCreateModalOpen(prev => ({ ...prev, open }));
+                } else {
+                    // Backdrop click / X icon: clear the form, not just close it.
+                    setCreateModalOpen({ open: false, name: "", description: "" });
+                }
+            }}>
                 <DialogContent className="max-w-2xl w-[50vw] max-h-[80vh] p-0 flex flex-col bg-[#111520] border border-[#27314e] text-white">
                     <div className="flex-shrink-0 px-6 pt-6 pb-3 border-b border-[#27314e]">
                         <DialogHeader>

@@ -126,7 +126,7 @@ export const loadApigeeOnboardingOptions = async () => {
   return Array.from(byId.values()).sort((a, b) => a.label.localeCompare(b.label));
 };
 
-export const getTrackingHeaders = ({ onboardingId, microserviceId } = {}) => {
+export const getTrackingHeaders = ({ onboardingId, microserviceId, projectId, projectName, applicationId, applicationName } = {}) => {
   const headers = {
     "Content-Type": "application/json",
   };
@@ -139,6 +139,14 @@ export const getTrackingHeaders = ({ onboardingId, microserviceId } = {}) => {
   if (microserviceId) {
     headers["x-microservice-id"] = microserviceId;
   }
+
+  // Business hierarchy (fsp-onboarding-svc) — which Project/Application this
+  // resource belongs to. Independent of onboardingId/microserviceId above,
+  // which track a separate, older onboarding-context system.
+  if (projectId) headers["x-project-id"] = projectId;
+  if (projectName) headers["x-project-name"] = projectName;
+  if (applicationId) headers["x-application-id"] = applicationId;
+  if (applicationName) headers["x-application-name"] = applicationName;
 
   const createdBy = getCurrentUserEmail();
   headers["x-created-by"] = createdBy || "unknown-user";

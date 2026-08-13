@@ -15,6 +15,7 @@ import { PaginationControls } from "../../components/ui/PaginationControls";
 import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTargetServerModal";
 import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
+import { getProjects, getApplications } from "../../http-service/onboardingApi";
 
 export const ProxiesView = ({ showMessage }) => {
     const navigate = useNavigate();
@@ -29,11 +30,23 @@ export const ProxiesView = ({ showMessage }) => {
     const [selectedBU, setSelectedBU] = useState("");
     const [selectedEnv, setSelectedEnv] = useState("ALL");
     const [version, setVersion] = useState("");
-    const [buLabel, setBuLabel] = useState("");
 
-    // Derive first-5-char prefix from selected BU name
-    const buPrefix = buLabel
-        ? buLabel.slice(0, 5).toLowerCase().replace(/[^a-z0-9]/g, "") + "-"
+    // Environment / Project / Application selection — entirely local to the Create
+    // Proxy dialog. Deliberately independent of the page-level GatewayContextSelector
+    // (BU/Project/Env there are for filtering the list, not for driving what gets created).
+    const [createProxyEnv, setCreateProxyEnv] = useState("");
+    const [createProxyProjects, setCreateProxyProjects] = useState([]);
+    const [loadingCreateProxyProjects, setLoadingCreateProxyProjects] = useState(false);
+    const [selectedCreateProxyProjectId, setSelectedCreateProxyProjectId] = useState("");
+    const [createProxyApplications, setCreateProxyApplications] = useState([]);
+    const [loadingCreateProxyApplications, setLoadingCreateProxyApplications] = useState(false);
+    const [selectedCreateProxyApplicationId, setSelectedCreateProxyApplicationId] = useState("");
+
+    const selectedCreateProxyProject = createProxyProjects.find((p) => p.id === selectedCreateProxyProjectId) || null;
+    const selectedCreateProxyApplication = createProxyApplications.find((a) => a.id === selectedCreateProxyApplicationId) || null;
+    // Derive first-4-char prefix from the selected application's name
+    const appPrefix = selectedCreateProxyApplication?.name
+        ? selectedCreateProxyApplication.name.slice(0, 4).toLowerCase().replace(/[^a-z0-9]/g, "") + "-"
         : "";
 
     // Pagination
@@ -46,7 +59,7 @@ export const ProxiesView = ({ showMessage }) => {
     const [trafficLoading, setTrafficLoading] = useState(false);
 
     // Create Proxy Modal State
-    const [createProxyModal, setCreateProxyModal] = useState({
+    const defaultCreateProxyModal = {
         open: false,
         template: "reverse",
         name: "",
@@ -55,11 +68,15 @@ export const ProxiesView = ({ showMessage }) => {
         targetUrl: "",
         zipFile: null,
         deploymentEnvs: [],
+        resources: [{ method: "GET", path: "" }],
+        security: { oauth2: false, mtls: false },
         apiType: "REST",
         openApiSpecFile: null,
         specParsed: false,
         specError: null,
-    });
+    };
+    const [createProxyModal, setCreateProxyModal] = useState(defaultCreateProxyModal);
+    const resetCreateProxyModal = () => setCreateProxyModal({ ...defaultCreateProxyModal });
     const [availableCreateEnvs, setAvailableCreateEnvs] = useState([]);
     const [loadingCreateEnvs, setLoadingCreateEnvs] = useState(false);
     const [fieldErrors, setFieldErrors] = useState({ name: "", basePath: "", version: "" });
@@ -256,29 +273,15 @@ export const ProxiesView = ({ showMessage }) => {
     //     }
     // };
 
-    // Fetch business units to get application for selected BU
+    // Application for the "New Backend" flow — always the Application chosen inside
+    // the Create Proxy dialog itself (no page-level fallback).
     const fetchBusinessUnitApplication = async () => {
-        if (!selectedBU) return null;
-        try {
-            // Get user email from context or store (adjust as needed)
-            const userEmail = localStorage.getItem('userEmail') || 'admin@forgecrux.com';
-            const res = await fetch(`${API_BASE_URL}/gatewayonboarding/api/v1/user/${userEmail}/business-units`);
-            if (res.ok) {
-                const result = await res.json();
-                const buList = result.data?.businessUnits || [];
-                const matchingBU = buList.find(bu => bu.id === selectedBU);
-                if (matchingBU) {
-                    return {
-                        name: matchingBU.applicationName,
-                        id: matchingBU.applicationId,
-                        onboardingId: matchingBU.onboardingId,
-                    };
-                }
-            }
-        } catch (err) {
-            console.error("Failed to fetch business unit application:", err);
-        }
-        return null;
+        if (!selectedCreateProxyApplication) return null;
+        return {
+            name: selectedCreateProxyApplication.name,
+            id: selectedCreateProxyApplication.id,
+            onboardingId: defaultOnboardingId || getFallbackOnboardingId(),
+        };
     };
 
     // When "New" radio is selected, fetch and open modal
@@ -286,7 +289,7 @@ export const ProxiesView = ({ showMessage }) => {
         setBackendOption("new");
         const app = await fetchBusinessUnitApplication();
         if (!app) {
-            showMessage("Could not fetch application details for the selected business unit.", "error");
+            showMessage("Please select a Project and Application above first.", "error");
             setBackendOption("existing");
             return;
         }
@@ -294,12 +297,12 @@ export const ProxiesView = ({ showMessage }) => {
         setShowTargetServerModal(true);
     };
 
-    // Helper: generate base path from proxy name
-    const generateBasePathFromName = (name) => {
-        if (!name) return "/";
-        const firstWord = name.trim().split(/\s+/)[0];
-        const clean = firstWord.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        return `/${clean}`;
+    // Helper: generate a base path from the proxy name + version, e.g. "my-api" + "v1" -> "/my-api/v1"
+    const generateBasePathFromNameAndVersion = (name, ver) => {
+        const clean = (name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        if (!clean) return "/";
+        const cleanVer = (ver || "").trim().toLowerCase().replace(/[^a-z0-9.]+/g, "");
+        return cleanVer ? `/${clean}/${cleanVer}` : `/${clean}`;
     };
 
     const handleProxyNameChange = (e) => {
@@ -308,20 +311,28 @@ export const ProxiesView = ({ showMessage }) => {
             showMessage("API name cannot contain spaces.", "error");
             return;
         }
-        // Enforce BU prefix — user cannot remove it
-        if (buPrefix && !value.startsWith(buPrefix)) {
-            value = buPrefix;
+        // Enforce the application prefix — user cannot remove it
+        if (appPrefix && !value.startsWith(appPrefix)) {
+            value = appPrefix;
         }
         setCreateProxyModal(prev => ({ ...prev, name: value }));
     };
 
     const handleProxyNameBlur = () => {
         const nameVal = createProxyModal.name.trim();
-        const nameError = (!nameVal || nameVal === buPrefix) ? "API name is required." : "";
+        const nameError = (!nameVal || nameVal === appPrefix) ? "API name is required." : "";
         setFieldErrors(prev => ({ ...prev, name: nameError }));
-        if (nameVal && nameVal !== buPrefix) {
-            const newBasePath = generateBasePathFromName(createProxyModal.name);
-            setCreateProxyModal(prev => ({ ...prev, basePath: newBasePath }));
+    };
+
+    // Auto-fill Base Path from the API name + version the moment the user focuses it,
+    // so there's no need to type the full path by hand.
+    const handleBasePathFocus = () => {
+        const current = createProxyModal.basePath;
+        if (!current || current === "/") {
+            const generated = generateBasePathFromNameAndVersion(createProxyModal.name, version);
+            if (generated !== "/") {
+                setCreateProxyModal(prev => ({ ...prev, basePath: generated }));
+            }
         }
     };
 
@@ -336,15 +347,6 @@ export const ProxiesView = ({ showMessage }) => {
         else if (!/v/i.test(version.trim())) err = "Version must contain the letter 'v' (e.g., v1, v2).";
         setFieldErrors(prev => ({ ...prev, version: err }));
     };
-    const fullBasePath = useMemo(() => {
-        const base = createProxyModal.basePath;
-        const ver = version.trim();
-        if (base === "/" && !ver) return "/";
-        if (base === "/") return `/${ver}`;
-        if (!ver) return base;
-        // Ensure no double slashes
-        return base.endsWith("/") ? `${base}${ver}` : `${base}/${ver}`;
-    }, [createProxyModal.basePath, version]);
 
     // Fetch environments for create modal
     const fetchCreateEnvironments = async () => {
@@ -423,23 +425,43 @@ export const ProxiesView = ({ showMessage }) => {
         fetchProxyTraffic();
     }, [selectedEnv, trafficRange]);
 
-    // Fetch BU team name when selectedBU changes so we can build the proxy-name prefix
+    // Load Projects for the Create Proxy dialog whenever it's open — independent of
+    // any page-level selection
     useEffect(() => {
-        if (!selectedBU) { setBuLabel(""); return; }
-        const fetchBuName = async () => {
-            try {
-                const userEmail = localStorage.getItem("userEmail") || "admin@forgecrux.com";
-                const res = await fetch(`${API_BASE_URL}/gatewayonboarding/api/v1/user/${userEmail}/business-units`);
-                if (res.ok) {
-                    const result = await res.json();
-                    const buList = result.data?.businessUnits || [];
-                    const match = buList.find((bu) => bu.id === selectedBU);
-                    setBuLabel(match?.teamName || "");
-                }
-            } catch { /* silent */ }
-        };
-        fetchBuName();
-    }, [selectedBU]);
+        if (!createProxyModal.open) return;
+        let cancelled = false;
+        setLoadingCreateProxyProjects(true);
+        getProjects(0, 200)
+            .then((data) => { if (!cancelled) setCreateProxyProjects(data || []); })
+            .catch((err) => {
+                console.error("Failed to load projects", err);
+                if (!cancelled) setCreateProxyProjects([]);
+            })
+            .finally(() => { if (!cancelled) setLoadingCreateProxyProjects(false); });
+        return () => { cancelled = true; };
+    }, [createProxyModal.open]);
+
+    // Load Applications for the dialog's own selected Project
+    useEffect(() => {
+        if (!selectedCreateProxyProjectId) { setCreateProxyApplications([]); return; }
+        let cancelled = false;
+        setLoadingCreateProxyApplications(true);
+        getApplications({ projectId: selectedCreateProxyProjectId, size: 100 })
+            .then((data) => { if (!cancelled) setCreateProxyApplications(data || []); })
+            .catch((err) => {
+                console.error("Failed to load applications", err);
+                if (!cancelled) setCreateProxyApplications([]);
+            })
+            .finally(() => { if (!cancelled) setLoadingCreateProxyApplications(false); });
+        return () => { cancelled = true; };
+    }, [selectedCreateProxyProjectId]);
+
+    // Re-seed the API name with the new prefix whenever the selected application changes
+    useEffect(() => {
+        if (!createProxyModal.open) return;
+        setCreateProxyModal(prev => ({ ...prev, name: appPrefix }));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [appPrefix]);
 
     useEffect(() => {
         if (createProxyModal.open && selectedOrg) fetchCreateEnvironments();
@@ -475,11 +497,11 @@ export const ProxiesView = ({ showMessage }) => {
         loadOptions();
     }, []);
 
-    // Fetch target servers when "Existing" is selected and environment changes
+    // Fetch target servers when "Existing" is selected and the dialog's own environment changes
     const fetchTargetServersForModal = async () => {
         if (backendOption !== "existing") return;
         const orgForTarget = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
-        if (!orgForTarget || !selectedEnv || selectedEnv === "ALL" || selectedEnv === "NOT_DEPLOYED") {
+        if (!orgForTarget || !createProxyEnv) {
             setTargetServers([]);
             setSelectedTargetServer("");
             return;
@@ -487,7 +509,7 @@ export const ProxiesView = ({ showMessage }) => {
         setLoadingTargetServers(true);
         try {
             const token = await fetchApigeeToken();
-            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${selectedEnv}/targetservers`;
+            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${createProxyEnv}/targetservers`;
             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
             if (response.ok) {
                 const data = await response.json();
@@ -512,7 +534,7 @@ export const ProxiesView = ({ showMessage }) => {
 
     useEffect(() => {
         fetchTargetServersForModal();
-    }, [backendOption, selectedOrg, selectedEnv, createProxyModal.open]);
+    }, [backendOption, selectedOrg, createProxyEnv, createProxyModal.open]);
 
     // Filtering logic (unchanged)
     const filteredBySearchAndEnv = useMemo(() => {
@@ -579,20 +601,74 @@ export const ProxiesView = ({ showMessage }) => {
     };
 
     // Generate proxy zip (unchanged)
-    const generateProxyZip = async (template, { name, basePath, targetUrl, targetServer }) => {
+    // Escape text/attribute content dropped into the generated proxy bundle XML
+    const escapeXml = (str) => String(str ?? "")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+    const generateProxyZip = async (template, { name, basePath, targetUrl, targetServer, resources = [], security = {} }) => {
         const zip = new JSZip();
         const apiproxyFolder = zip.folder("apiproxy");
+
+        // OAuth 2.0 enforcement is a real, deployable Apigee policy — attach it as a
+        // PreFlow step so every request is verified before it reaches a resource flow.
+        // MTLS is intentionally NOT wired into the bundle here: mutual-TLS termination
+        // is configured at the environment/virtual-host level against a real keystore +
+        // truststore, which this dialog has no way to select — faking an <SSLInfo> block
+        // without one would either fail to deploy or silently do nothing.
+        const useOAuth2 = !!security.oauth2;
+        const policiesXml = useOAuth2 ? `<Policies><Policy>VerifyOAuthV2</Policy></Policies>` : "";
+
         const apiProxyXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <APIProxy revision="1" name="${name}">
   <BasePaths>${basePath}</BasePaths>
   <ProxyEndpoints><ProxyEndpoint>default</ProxyEndpoint></ProxyEndpoints>
   ${template === "reverse" ? "<TargetEndpoints><TargetEndpoint>default</TargetEndpoint></TargetEndpoints>" : ""}
+  ${policiesXml}
 </APIProxy>`;
         apiproxyFolder.file(`${name}.xml`, apiProxyXml);
+
+        if (useOAuth2) {
+            const policiesFolder = apiproxyFolder.folder("policies");
+            const oauthPolicyXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OAuthV2 name="VerifyOAuthV2">
+  <DisplayName>Verify OAuth v2.0 Access Token</DisplayName>
+  <Operation>VerifyAccessToken</Operation>
+</OAuthV2>`;
+            policiesFolder.file("VerifyOAuthV2.xml", oauthPolicyXml);
+        }
+
         const proxiesFolder = apiproxyFolder.folder("proxies");
+
+        // Declared Resources become conditional Flows so the proxy actually recognizes
+        // each {method, path} pair (and so the Proxy Details view can read them straight
+        // back out of the deployed bundle, the same way it renders any other flow).
+        const declaredResources = resources.filter((r) => r?.path && r.path.trim());
+        const flowsXml = declaredResources.length > 0
+            ? `<Flows>
+${declaredResources.map((r, idx) => {
+                const method = escapeXml((r.method || "GET").toUpperCase());
+                const path = escapeXml(r.path.trim().startsWith("/") ? r.path.trim() : `/${r.path.trim()}`);
+                return `    <Flow name="resource-${idx + 1}">
+      <Description>${method} ${path}</Description>
+      <Condition>(proxy.pathsuffix MatchesPath "${path}") and (request.verb = "${method}")</Condition>
+    </Flow>`;
+            }).join("\n")}
+  </Flows>`
+            : "";
+
+        const preFlowXml = useOAuth2
+            ? `<PreFlow name="PreFlow">
+    <Request><Step><Name>VerifyOAuthV2</Name></Step></Request>
+    <Response/>
+  </PreFlow>`
+            : "";
+
         const proxyEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ProxyEndpoint name="default">
   <HTTPProxyConnection><BasePath>${basePath}</BasePath></HTTPProxyConnection>
+  ${preFlowXml}
+  ${flowsXml}
   <RouteRule name="default"/>
 </ProxyEndpoint>`;
         proxiesFolder.file("default.xml", proxyEndpointXml);
@@ -802,8 +878,12 @@ export const ProxiesView = ({ showMessage }) => {
     // };
     const createProxy = async () => {
         const modal = createProxyModal;
+        if (!createProxyEnv || !selectedCreateProxyProjectId || !selectedCreateProxyApplicationId) {
+            showMessage("Please select an Environment, Project and Application.", "error");
+            return;
+        }
         const errors = {};
-        if (!modal.name.trim() || modal.name.trim() === buPrefix) {
+        if (!modal.name.trim() || modal.name.trim() === appPrefix) {
             errors.name = "API name is required.";
         }
         if (modal.template !== "upload") {
@@ -842,9 +922,11 @@ export const ProxiesView = ({ showMessage }) => {
             if (modal.template === "reverse" || modal.template === "no-target") {
                 zipToUpload = await generateProxyZip(modal.template, {
                     name: modal.name,
-                    basePath: fullBasePath,
+                    basePath: modal.basePath,
                     targetUrl: modal.targetUrl,
                     targetServer: backendOption === "existing" ? selectedTargetServer : null,
+                    resources: modal.resources,
+                    security: modal.security,
                 });
             } else if (modal.template === "upload") {
                 zipToUpload = modal.zipFile;
@@ -873,11 +955,18 @@ export const ProxiesView = ({ showMessage }) => {
             const createdApi = await response.clone().json().catch(() => ({ name: modal.name }));
             await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
                 method: "POST",
-                headers: getTrackingHeaders({ onboardingId: defaultOnboardingId, microserviceId: defaultMicroserviceId }),
+                headers: getTrackingHeaders({
+                    onboardingId: defaultOnboardingId,
+                    microserviceId: defaultMicroserviceId,
+                    projectId: selectedCreateProxyProjectId,
+                    projectName: selectedCreateProxyProject?.name,
+                    applicationId: selectedCreateProxyApplication?.id,
+                    applicationName: selectedCreateProxyApplication?.name,
+                }),
                 body: JSON.stringify({
                     operation: "CREATE",
-                    requestPayload: { name: modal.name, apiType: selectedApiType },
-                    afterSnapshot: { ...createdApi, apiType: selectedApiType },
+                    requestPayload: { name: modal.name, apiType: selectedApiType, resources: modal.resources, security: modal.security },
+                    afterSnapshot: { ...createdApi, apiType: selectedApiType, resources: modal.resources, security: modal.security },
                     responsePayload: createdApi,
                 }),
             });
@@ -886,7 +975,7 @@ export const ProxiesView = ({ showMessage }) => {
             if (selectedProducts.length > 0) {
                 for (const prodName of selectedProducts) {
                     try {
-                        await addProxyToProduct(prodName, modal.name, fullBasePath);
+                        await addProxyToProduct(prodName, modal.name, modal.basePath);
                         showMessage(`Proxy added to product "${prodName}"`, "success");
                     } catch (err) {
                         showMessage(`Failed to update product ${prodName}: ${err.message}`, "error");
@@ -895,26 +984,7 @@ export const ProxiesView = ({ showMessage }) => {
             }
 
             // Reset modal state
-            setCreateProxyModal({
-                open: false,
-                template: "reverse",
-                name: "",
-                basePath: "/",
-                description: "",
-                targetUrl: "",
-                zipFile: null,
-                deploymentEnvs: [],
-                apiType: "REST",
-                openApiSpecFile: null,
-                specParsed: false,
-                specError: null,
-            });
-            setProductOption("existing");
-            setSelectedProducts([]);
-            setVersion("");
-            setBackendOption("existing");
-            setSelectedTargetServer("");
-            setFieldErrors({ name: "", basePath: "", version: "" });
+            closeCreateProxyModal();
 
             // Refresh the proxies list
             await fetchProxies();
@@ -930,20 +1000,47 @@ export const ProxiesView = ({ showMessage }) => {
         navigate(`${proxyBasePath}/proxy/${proxy.name}`, { state: { proxy } });
     };
 
+    // Closes the Create Proxy modal and clears every field it seeded, so a
+    // reopen (whether via Cancel, the X icon, or a backdrop click) never
+    // shows data left over from a previous session.
+    const closeCreateProxyModal = () => {
+        resetCreateProxyModal();
+        setProductOption("existing");
+        setSelectedProducts([]);
+        setProductModalOpen(false);
+        setNewProductData({
+            name: "", displayName: "", description: "", environment: "",
+            accessType: "private", autoApprove: false,
+        });
+        setFieldErrors({ name: "", basePath: "", version: "" });
+        setVersion("");
+        setBackendOption("existing");
+        setSelectedTargetServer("");
+        setCreateProxyEnv("");
+        setSelectedCreateProxyProjectId("");
+        setSelectedCreateProxyApplicationId("");
+    };
+
     const handleCreateClick = () => {
         let initialApiType = "Rest";
         if (apiTypeFilter !== "ALL") {
             const typeMap = { "REST": "Rest", "SOAP": "SOAP", "GraphQL": "GraphQL", "MCP": "MCP" };
             initialApiType = typeMap[apiTypeFilter] || "Rest";
         }
-        setCreateProxyModal(prev => ({
-            ...prev,
+        setCreateProxyModal({
+            ...defaultCreateProxyModal,
             open: true,
             apiType: initialApiType,
-            name: buPrefix, // seed with BU prefix
-        }));
+        });
+        setProductOption("existing");
+        setSelectedProducts([]);
+        setFieldErrors({ name: "", basePath: "", version: "" });
+        setVersion("");
         setBackendOption("existing");
         setSelectedTargetServer("");
+        setCreateProxyEnv("");
+        setSelectedCreateProxyProjectId("");
+        setSelectedCreateProxyApplicationId("");
     };
 
     const checkProxyExists = async (proxyName) => {
@@ -1203,18 +1300,11 @@ export const ProxiesView = ({ showMessage }) => {
 
             {/* Create Proxy Modal - modified Backend section */}
             <Dialog open={createProxyModal.open} onOpenChange={(open) => {
-                setCreateProxyModal((prev) => ({ ...prev, open }))
                 if (!open) {
-                    setProductOption("existing");
-                    setSelectedProducts([]);
-                    setProductModalOpen(false);
-                    setNewProductData({
-                        name: "", displayName: "", description: "", environment: "",
-                        accessType: "private", autoApprove: false,
-                    });
-                    setFieldErrors({ name: "", basePath: "", version: "" });
+                    closeCreateProxyModal();
+                } else {
+                    setCreateProxyModal((prev) => ({ ...prev, open }));
                 }
-                setCreateProxyModal((prev) => ({ ...prev, open }));
             }}>
                 <DialogContent className="max-w-6xl w-[60vw] max-h-[90vh] p-0 flex flex-col bg-[#111520] border border-[#27314e] text-white">
                     <div className="flex-shrink-0 px-6 pt-6 pb-3 border-b border-[#27314e]">
@@ -1234,6 +1324,65 @@ export const ProxiesView = ({ showMessage }) => {
                                         <span className="text-white">{type}</span>
                                     </label>
                                 ))}
+                            </div>
+                        </div>
+                        {/* Environment, Project & Application — all self-contained in this dialog,
+                            independent of whatever the page-level filters happen to be set to */}
+                        <div className="grid grid-cols-3 gap-3">
+                            <div>
+                                <label className="text-sm font-medium text-white">
+                                    Environment <span className="text-red-400">*</span>
+                                </label>
+                                <select
+                                    value={createProxyEnv}
+                                    onChange={(e) => setCreateProxyEnv(e.target.value)}
+                                    disabled={loadingCreateEnvs}
+                                    className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                >
+                                    <option value="">{loadingCreateEnvs ? "Loading environments..." : "Select Environment"}</option>
+                                    {availableCreateEnvs.map((env) => (
+                                        <option key={env} value={env}>{env}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium text-white">
+                                    Project <span className="text-red-400">*</span>
+                                </label>
+                                <select
+                                    value={selectedCreateProxyProjectId}
+                                    onChange={(e) => {
+                                        setSelectedCreateProxyProjectId(e.target.value);
+                                        setSelectedCreateProxyApplicationId("");
+                                    }}
+                                    disabled={loadingCreateProxyProjects}
+                                    className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                >
+                                    <option value="">{loadingCreateProxyProjects ? "Loading projects..." : "Select Project"}</option>
+                                    {createProxyProjects.map((p) => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium text-white">
+                                    Application <span className="text-red-400">*</span>
+                                </label>
+                                <select
+                                    value={selectedCreateProxyApplicationId}
+                                    onChange={(e) => setSelectedCreateProxyApplicationId(e.target.value)}
+                                    disabled={!selectedCreateProxyProjectId || loadingCreateProxyApplications}
+                                    className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                >
+                                    <option value="">
+                                        {!selectedCreateProxyProjectId
+                                            ? "Select a project first"
+                                            : loadingCreateProxyApplications ? "Loading applications..." : "Select Application"}
+                                    </option>
+                                    {createProxyApplications.map((a) => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
                         {/* Template */}
@@ -1308,54 +1457,36 @@ export const ProxiesView = ({ showMessage }) => {
                                         API Name <span className="text-red-400">*</span>
                                     </label>
                                     <div className={`mt-1 flex overflow-hidden rounded-lg border bg-[#0f1117] focus-within:border-[#ff5b1f] transition-colors ${fieldErrors.name ? "border-red-500" : "border-[#2a3550]"}`}>
-                                        {buPrefix && (
+                                        {appPrefix && (
                                             <span className="flex items-center select-none whitespace-nowrap border-r border-[#2a3550] bg-[#1a1f2e] px-3 font-mono text-sm text-[#ff8a5c]">
-                                                {buPrefix}
+                                                {appPrefix}
                                             </span>
                                         )}
                                         <input
                                             type="text"
-                                            placeholder="api-name"
-                                            value={buPrefix ? createProxyModal.name.slice(buPrefix.length) : createProxyModal.name}
+                                            placeholder={appPrefix ? "api-name" : "Select a Project and Application first"}
+                                            disabled={!appPrefix}
+                                            value={appPrefix ? createProxyModal.name.slice(appPrefix.length) : createProxyModal.name}
                                             onChange={(e) => {
                                                 const suffix = e.target.value;
                                                 if (/\s/.test(suffix)) { showMessage("API name cannot contain spaces.", "error"); return; }
-                                                setCreateProxyModal(prev => ({ ...prev, name: buPrefix + suffix }));
+                                                setCreateProxyModal(prev => ({ ...prev, name: appPrefix + suffix }));
                                                 if (fieldErrors.name) setFieldErrors(prev => ({ ...prev, name: "" }));
                                             }}
                                             onBlur={handleProxyNameBlur}
-                                            className="flex-1 bg-transparent px-3 py-2 text-white focus:outline-none"
+                                            className="flex-1 bg-transparent px-3 py-2 text-white focus:outline-none disabled:opacity-50"
                                         />
                                     </div>
                                     {fieldErrors.name
                                         ? <p className="mt-1 text-xs text-red-400">{fieldErrors.name}</p>
-                                        : buPrefix && <p className="mt-1 text-xs text-slate-500">Prefix <span className="font-mono text-[#ff8a5c]">{buPrefix}</span> is locked to your selected business unit. Enter the API name after the prefix.</p>
+                                        : appPrefix && <p className="mt-1 text-xs text-slate-500">Prefix <span className="font-mono text-[#ff8a5c]">{appPrefix}</span> is locked to your selected application. Enter the API name after the prefix.</p>
                                     }
                                 </div>
 
                                 {createProxyModal.template !== "upload" && (
                                     <>
-                                        {/* Base Path and Version side by side */}
+                                        {/* Version and Base Path side by side — fill Version first so Base Path can auto-fill from name + version */}
                                         <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-sm font-medium text-white">
-                                                    Base Path <span className="text-red-400">*</span>
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    value={createProxyModal.basePath}
-                                                    onChange={(e) => {
-                                                        setCreateProxyModal(prev => ({ ...prev, basePath: e.target.value }));
-                                                        if (fieldErrors.basePath) setFieldErrors(prev => ({ ...prev, basePath: "" }));
-                                                    }}
-                                                    onBlur={handleBasePathBlur}
-                                                    className={`mt-1 w-full rounded-lg border bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f] ${fieldErrors.basePath ? "border-red-500" : "border-[#2a3550]"}`}
-                                                />
-                                                {fieldErrors.basePath
-                                                    ? <p className="mt-1 text-xs text-red-400">{fieldErrors.basePath}</p>
-                                                    : <p className="text-xs text-slate-500 mt-1">Auto-filled from proxy name, can be edited</p>
-                                                }
-                                            </div>
                                             <div>
                                                 <label className="text-sm font-medium text-white">
                                                     Version <span className="text-red-400">*</span>
@@ -1376,11 +1507,26 @@ export const ProxiesView = ({ showMessage }) => {
                                                     : <p className="text-xs text-slate-500 mt-1">Must contain the letter 'v' (e.g., v1, v2.0)</p>
                                                 }
                                             </div>
-                                        </div>
-                                        {/* Full path preview */}
-                                        <div className="bg-[#0f1117] rounded-lg p-3 border border-[#2a3550]">
-                                            <p className="text-xs text-slate-400">Full base path</p>
-                                            <p className="text-sm font-mono text-[#ff8a5c] break-all">{fullBasePath}</p>
+                                            <div>
+                                                <label className="text-sm font-medium text-white">
+                                                    Base Path <span className="text-red-400">*</span>
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={createProxyModal.basePath}
+                                                    onFocus={handleBasePathFocus}
+                                                    onChange={(e) => {
+                                                        setCreateProxyModal(prev => ({ ...prev, basePath: e.target.value }));
+                                                        if (fieldErrors.basePath) setFieldErrors(prev => ({ ...prev, basePath: "" }));
+                                                    }}
+                                                    onBlur={handleBasePathBlur}
+                                                    className={`mt-1 w-full rounded-lg border bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f] ${fieldErrors.basePath ? "border-red-500" : "border-[#2a3550]"}`}
+                                                />
+                                                {fieldErrors.basePath
+                                                    ? <p className="mt-1 text-xs text-red-400">{fieldErrors.basePath}</p>
+                                                    : <p className="text-xs text-slate-500 mt-1">Auto-filled from API name + version, can be edited</p>
+                                                }
+                                            </div>
                                         </div>
                                         <div>
                                             <label className="text-sm font-medium text-white">Description (Optional)</label>
@@ -1390,6 +1536,92 @@ export const ProxiesView = ({ showMessage }) => {
                                                 onChange={(e) => setCreateProxyModal(prev => ({ ...prev, description: e.target.value }))}
                                                 className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
                                             />
+                                        </div>
+                                        {/* Resources (Method + Endpoint pairs) */}
+                                        <div>
+                                            <div className="flex items-center justify-between">
+                                                <label className="text-sm font-medium text-white">Resources ({createProxyModal.resources.length})</label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCreateProxyModal(prev => ({
+                                                        ...prev,
+                                                        resources: [...prev.resources, { method: "GET", path: "" }],
+                                                    }))}
+                                                    className="flex items-center gap-1 text-xs font-medium text-[#ff8a5c] hover:text-[#ff5b1f]"
+                                                >
+                                                    <Plus className="h-3.5 w-3.5" /> Add
+                                                </button>
+                                            </div>
+                                            <div className="mt-2 space-y-2">
+                                                {createProxyModal.resources.map((resource, idx) => (
+                                                    <div key={idx} className="grid grid-cols-[120px_1fr_auto] gap-2 items-center">
+                                                        <select
+                                                            value={resource.method}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                resources: prev.resources.map((r, i) => i === idx ? { ...r, method: e.target.value } : r),
+                                                            }))}
+                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            {["GET", "POST", "PUT", "DELETE", "PATCH"].map((m) => (
+                                                                <option key={m} value={m}>{m}</option>
+                                                            ))}
+                                                        </select>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="/resource-path"
+                                                            value={resource.path}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                resources: prev.resources.map((r, i) => i === idx ? { ...r, path: e.target.value } : r),
+                                                            }))}
+                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                resources: prev.resources.filter((_, i) => i !== idx),
+                                                            }))}
+                                                            disabled={createProxyModal.resources.length <= 1}
+                                                            className="p-2 text-slate-400 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                                                            title="Remove"
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        {/* Security */}
+                                        <div>
+                                            <label className="text-sm font-medium text-white">Security</label>
+                                            <div className="mt-2 flex flex-wrap gap-4">
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={createProxyModal.security.oauth2}
+                                                        onChange={(e) => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            security: { ...prev.security, oauth2: e.target.checked },
+                                                        }))}
+                                                        className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">OAuth 2.0</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={createProxyModal.security.mtls}
+                                                        onChange={(e) => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            security: { ...prev.security, mtls: e.target.checked },
+                                                        }))}
+                                                        className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">MTLS</span>
+                                                </label>
+                                            </div>
                                         </div>
                                     </>
                                 )}
@@ -1441,9 +1673,11 @@ export const ProxiesView = ({ showMessage }) => {
                                                 <label className="text-sm font-medium text-white">Backend Service</label>
                                                 {loadingTargetServers ? (
                                                     <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                ) : !createProxyEnv ? (
+                                                    <div className="mt-1 text-sm text-amber-400">Select an environment above first</div>
                                                 ) : targetServers.length === 0 ? (
                                                     <div className="mt-1 text-sm text-amber-400">
-                                                        No backend services available for {selectedEnv !== "ALL" && selectedEnv !== "NOT_DEPLOYED" ? selectedEnv : "current environment"}
+                                                        No backend services available for {createProxyEnv}
                                                     </div>
                                                 ) : (
                                                     <select
@@ -1458,7 +1692,7 @@ export const ProxiesView = ({ showMessage }) => {
                                                     </select>
                                                 )}
                                                 <p className="text-xs text-slate-500 mt-1">
-                                                    Using environment: {selectedEnv !== "ALL" && selectedEnv !== "NOT_DEPLOYED" ? selectedEnv : "Not selected"}
+                                                    Using environment: {createProxyEnv || "Not selected"}
                                                 </p>
                                             </div>
                                         )}
@@ -1570,7 +1804,7 @@ export const ProxiesView = ({ showMessage }) => {
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
-                        <Button variant="outline" onClick={() => setCreateProxyModal((prev) => ({ ...prev, open: false }))}>Cancel</Button>
+                        <Button variant="outline" onClick={closeCreateProxyModal}>Cancel</Button>
                         <Button onClick={createProxy} className="bg-[#ff5b1f] hover:bg-[#ff6b36]">Create</Button>
                     </div>
                 </DialogContent>
@@ -1657,7 +1891,7 @@ export const ProxiesView = ({ showMessage }) => {
                     }}
                     onError={(errorMsg) => showMessage(errorMsg, "error")}
                     organization={selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg}
-                    environment={selectedEnv !== "ALL" && selectedEnv !== "NOT_DEPLOYED" ? selectedEnv : ""}
+                    environment={createProxyEnv}
                     onboardingOptions={onboardingOptions}
                     isFetchingOnboardings={isFetchingOnboardings}
                     defaultOnboardingId={defaultOnboardingId}

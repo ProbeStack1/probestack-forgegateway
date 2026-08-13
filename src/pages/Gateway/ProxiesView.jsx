@@ -1255,7 +1255,7 @@ ${declaredResources.map((r, idx) => {
                         <table className="w-full text-sm">
                             <thead className="bg-dark-800/70 border-b border-dark-700">
                                 <tr>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium w-[220px]">Name</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Type</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">
                                         <div className="flex items-center gap-2">
@@ -1278,14 +1278,16 @@ ${declaredResources.map((r, idx) => {
                                     </th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Last Modified</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Modified By</th>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">Source</th>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium">Actions</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium whitespace-nowrap">Source</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium whitespace-nowrap">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedProxies.map((proxy) => (
                                     <tr key={proxy.name} className="border-b border-dark-700 hover:bg-dark-800/40 cursor-pointer" onClick={() => handleProxySelect(proxy)}>
-                                        <td className="p-3 text-white font-mono text-sm">{proxy.name}</td>
+                                        <td className="p-3 text-white font-mono text-sm">
+                                            <span className="block max-w-[220px] truncate" title={proxy.name}>{proxy.name}</span>
+                                        </td>
                                         <td className="p-3">
                                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${(proxy.type || "REST") === "REST" ? "bg-blue-500/20 text-blue-300" :
                                                 (proxy.type || "REST") === "SOAP" ? "bg-purple-500/20 text-purple-300" :
@@ -1313,14 +1315,14 @@ ${declaredResources.map((r, idx) => {
                                         <td className="p-3 text-[#7f8fa8]">
                                             {proxy.updatedBy || proxy.lastModifiedBy || proxy.audit?.registry?.updatedBy || "—"}
                                         </td>
-                                        <td className="p-3">
+                                        <td className="p-3 whitespace-nowrap">
                                             {proxy.source === "LIFECYCLE_TOOL" ? (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-emerald-500/40 bg-emerald-500/10 text-emerald-300">ForgeSphere</span>
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-emerald-500/40 bg-emerald-500/10 text-emerald-300 whitespace-nowrap">ForgeSphere</span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300">API Hub</span>
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border-amber-500/40 bg-amber-500/10 text-amber-300 whitespace-nowrap">API Hub</span>
                                             )}
                                         </td>
-                                        <td className="p-3">
+                                        <td className="p-3 whitespace-nowrap">
                                             <div className="flex items-center gap-2">
                                                 <button onClick={(e) => { e.stopPropagation(); handleProxySelect(proxy); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="View details"><Eye className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); openProxyEditor(proxy.name); }} className="text-violet-400 hover:text-violet-300" title="Open in Proxy Editor"><FileCode2 className="h-4 w-4" /></button>
@@ -1664,7 +1666,7 @@ ${declaredResources.map((r, idx) => {
                                                         }))}
                                                         className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">MTLS</span>
+                                                    <span className="text-white">mTLS</span>
                                                 </label>
                                             </div>
                                         </div>

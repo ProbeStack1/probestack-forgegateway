@@ -81,15 +81,9 @@ const parseProxyEndpointXml = (xmlString) => {
         Array.from(root.querySelectorAll("RouteRule > TargetEndpoint")).map(xmlText).filter(Boolean)
     )];
 
-    const preFlowEl = root.querySelector(":scope > PreFlow");
-    const postFlowEl = root.querySelector(":scope > PostFlow");
     const namedFlowEls = Array.from(root.querySelectorAll(":scope > Flows > Flow"));
 
-    const flows = [
-        { name: preFlowEl?.getAttribute("name") || "PreFlow", method: "ALL", path: "n/a", condition: "" },
-        ...namedFlowEls.map((el) => parseFlowCondition(el, "Flow", "COND", "")),
-        { name: postFlowEl?.getAttribute("name") || "PostFlow", method: "ALL", path: "n/a", condition: "" },
-    ].filter(Boolean);
+    const flows = namedFlowEls.map((el) => parseFlowCondition(el, "Flow", "COND", "")).filter(Boolean);
 
     return { name, basePath, targetEndpoints, flows };
 };
@@ -126,6 +120,21 @@ const parseProxyBundle = async (blob) => {
 // Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
 // buried inside the fetch response's text body — surface the specific violation (e.g. which
 // proxy/revision owns a conflicting base path) instead of dumping the whole JSON blob at the user.
+const CopyIconButton = ({ value, label = "Copy", onCopied, className = "" }) => (
+    <button
+        type="button"
+        onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(value);
+            onCopied?.();
+        }}
+        title={label}
+        className={`p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition shrink-0 ${className}`}
+    >
+        <Copy className="h-3.5 w-3.5" />
+    </button>
+);
+
 const parseApigeeErrorMessage = (text) => {
     try {
         const parsed = JSON.parse(text);
@@ -2411,7 +2420,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <div className="flex flex-col items-end gap-1.5 max-w-[65%]">
                                                 {getApiUrls().length > 0 ? (
                                                     getApiUrls().map(({ environment, host, url }) => (
-                                                        <div key={`${environment}-${host}`} className="flex items-center gap-2 justify-end">
+                                                        <div key={`${environment}-${host}`} className="group flex items-center gap-2 justify-end">
                                                             <span className="text-[10px] uppercase tracking-wide bg-[#2a3550] text-slate-300 px-1.5 py-0.5 rounded-full flex-shrink-0">
                                                                 {environment}
                                                             </span>
@@ -2423,6 +2432,11 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                             >
                                                                 {url}
                                                             </a>
+                                                            <CopyIconButton
+                                                                value={url}
+                                                                label="Copy URL"
+                                                                onCopied={() => showMessage('Copied URL to clipboard', 'success')}
+                                                            />
                                                         </div>
                                                     ))
                                                 ) : loadingEnvGroups && (proxyDetails?.deployments?.deployments?.length > 0) ? (
@@ -2432,11 +2446,18 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                 )}
                                             </div>
                                         </div>
-                                        <div className="flex justify-between items-center">
+                                        <div className="group flex justify-between items-center">
                                             <span className="text-xs text-slate-400">Base Path</span>
-                                            <code className="font-mono text-sm text-[#4f8ef7] bg-[#0f1117] px-2 py-0.5 rounded">
-                                                {getBasePath()}
-                                            </code>
+                                            <div className="flex items-center gap-1.5">
+                                                <code className="font-mono text-sm text-[#4f8ef7] bg-[#0f1117] px-2 py-0.5 rounded">
+                                                    {getBasePath()}
+                                                </code>
+                                                <CopyIconButton
+                                                    value={getBasePath()}
+                                                    label="Copy base path"
+                                                    onCopied={() => showMessage('Copied base path to clipboard', 'success')}
+                                                />
+                                            </div>
                                         </div>
                                         <div className="flex justify-between items-start gap-3">
                                             <span className="text-xs text-slate-400 flex-shrink-0 mt-1">Policies</span>
@@ -2630,27 +2651,39 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             const isOpen = !!expandedEndpoints[ep.name];
                                             return (
                                                 <div key={ep.name}>
-                                                    <button
+                                                    <div
+                                                        role="button"
+                                                        tabIndex={0}
                                                         onClick={() => toggleEndpointExpanded(ep.name)}
-                                                        className="w-full flex items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#1a1f2e]/50 transition"
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEndpointExpanded(ep.name); }
+                                                        }}
+                                                        className="w-full flex items-center justify-between gap-3 px-5 py-3 text-left hover:bg-[#1a1f2e]/50 transition cursor-pointer"
                                                     >
                                                         <div className="flex items-center gap-2 min-w-0">
                                                             {isOpen ? <ChevronUp className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />}
                                                             <span className="font-mono text-sm text-white truncate">{ep.name}</span>
                                                         </div>
-                                                        <div className="flex items-center gap-6 text-xs text-slate-400 shrink-0">
-                                                            <span className="font-mono text-slate-300">{ep.basePath}</span>
+                                                        <div className="group flex items-center gap-6 text-xs text-slate-400 shrink-0">
+                                                            <span className="flex items-center gap-1">
+                                                                <span className="font-mono text-slate-300">{ep.basePath}</span>
+                                                                <CopyIconButton
+                                                                    value={ep.basePath}
+                                                                    label="Copy base path"
+                                                                    onCopied={() => showMessage('Copied base path to clipboard', 'success')}
+                                                                />
+                                                            </span>
                                                             <span>{ep.targetEndpoints.length > 0 ? ep.targetEndpoints.join(', ') : 'none'}</span>
                                                         </div>
-                                                    </button>
+                                                    </div>
                                                     {isOpen && (
                                                         <div className="px-5 pb-4">
                                                             <table className="w-full text-sm rounded-lg overflow-hidden border border-[#2a3550]">
                                                                 <thead className="bg-[#1a1f2e] border-b border-[#2a3550]">
                                                                     <tr>
-                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Endpoint Flow Name</th>
+                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Resource</th>
                                                                         <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Method</th>
-                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Path / Condition</th>
+                                                                        <th className="text-left p-2.5 text-[#5a6a8a] font-medium">Path</th>
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
@@ -2667,7 +2700,16 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                                                     : 'bg-slate-500/20 text-slate-300'
                                                                                 }`}>{flow.method}</span>
                                                                             </td>
-                                                                            <td className="p-2.5 font-mono text-xs text-slate-400">{flow.path}</td>
+                                                                            <td className="p-2.5 font-mono text-xs text-slate-400">
+                                                                                <span className="inline-flex items-center gap-1">
+                                                                                    {flow.path}
+                                                                                    <CopyIconButton
+                                                                                        value={flow.path}
+                                                                                        label="Copy path"
+                                                                                        onCopied={() => showMessage('Copied path to clipboard', 'success')}
+                                                                                    />
+                                                                                </span>
+                                                                            </td>
                                                                         </tr>
                                                                     ))}
                                                                 </tbody>
@@ -2699,10 +2741,19 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                         <tbody>
                                             {targetEndpointsList.length > 0 ? (
                                                 targetEndpointsList.map((te) => (
-                                                    <tr key={te.name} className="border-b border-[#1f2840] hover:bg-[#1a1f2e]/50 transition">
+                                                    <tr key={te.name} className="group border-b border-[#1f2840] hover:bg-[#1a1f2e]/50 transition">
                                                         <td className="p-3 font-mono text-white">{te.name}</td>
                                                         <td className="p-3 font-mono text-xs text-slate-400 break-all">
-                                                            {te.url || (te.targetServer ? `Backend Service: ${te.targetServer}` : 'none')}
+                                                            {te.url ? (
+                                                                <span className="inline-flex items-center gap-1">
+                                                                    {te.url}
+                                                                    <CopyIconButton
+                                                                        value={te.url}
+                                                                        label="Copy target URL"
+                                                                        onCopied={() => showMessage('Copied target URL to clipboard', 'success')}
+                                                                    />
+                                                                </span>
+                                                            ) : (te.targetServer ? `Backend Service: ${te.targetServer}` : 'none')}
                                                         </td>
                                                         <td className="p-3 font-mono text-xs text-[#4f8ef7]">
                                                             {(targetEndpointUsage[te.name] || []).join(', ') || '—'}

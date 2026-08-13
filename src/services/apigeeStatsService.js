@@ -180,6 +180,46 @@ export const fetchApigeeStatsDetailed = async (token, environment, dimension, se
 };
 
 /**
+ * Org-wide time series for a dashboard (e.g. "requests across every proxy, per hour") —
+ * unlike `fetchApigeeStatsDetailed`, which reads only `dimensions[0]` (correct when a
+ * `filterExpr` narrows the call to one dimension value), this sums every dimension entry
+ * Apigee returns bucket-by-bucket, so an unfiltered `dimension: 'apiproxy'` call rolls up
+ * every proxy's series into one line instead of silently returning just the first proxy.
+ */
+export const fetchApigeeAggregatedStats = async (token, environment, dimension, selectExprs, timeRange, filterExpr) => {
+  const { start, end } = getTimeRangeTimestamps(timeRange);
+  const timeUnit = getTimeUnitForRange(timeRange);
+  let url =
+    `https://apigee.googleapis.com/v1/organizations/${APIGEE_ORG}/environments/${environment}/stats/${dimension}` +
+    `?select=${encodeURIComponent(selectExprs.join(','))}` +
+    `&timeRange=${encodeURIComponent(`${start}~${end}`)}` +
+    `&timeUnit=${timeUnit}`;
+  if (filterExpr) url += `&filter=${encodeURIComponent(filterExpr)}`;
+
+  const data = await fetchStatsJson(url, token);
+  const dimensionEntries = data?.environments?.[0]?.dimensions
+    || (data?.environments?.[0]?.metrics ? [{ metrics: data.environments[0].metrics }] : []);
+
+  const series = {};
+  selectExprs.forEach((expr, idx) => {
+    const byTimestamp = new Map();
+    dimensionEntries.forEach((entry) => {
+      const match = (entry.metrics || []).find((m) => m.name === expr) || entry.metrics?.[idx];
+      (match?.values || []).forEach((v) => {
+        const timestamp = Number(v.timestamp);
+        const value = parseFloat(v.value) || 0;
+        byTimestamp.set(timestamp, (byTimestamp.get(timestamp) || 0) + value);
+      });
+    });
+    series[expr] = Array.from(byTimestamp.entries())
+      .map(([timestamp, value]) => ({ timestamp, value }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  });
+
+  return { series, notices: data?.metaData?.notices || [] };
+};
+
+/**
  * Aggregate breakdown by dimension value (no timeUnit) — one row per value observed for
  * `dimension` (e.g. one row per status code, per proxy, per target host) with totals for
  * each entry in `selectExprs`.

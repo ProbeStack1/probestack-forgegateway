@@ -123,6 +123,19 @@ const parseProxyBundle = async (blob) => {
     return { proxyEndpoints, targetEndpoints };
 };
 
+// Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
+// buried inside the fetch response's text body — surface the specific violation (e.g. which
+// proxy/revision owns a conflicting base path) instead of dumping the whole JSON blob at the user.
+const parseApigeeErrorMessage = (text) => {
+    try {
+        const parsed = JSON.parse(text);
+        const violation = parsed?.error?.details?.flatMap((d) => d.violations || [])?.[0];
+        return violation?.description || parsed?.error?.message || text;
+    } catch {
+        return text;
+    }
+};
+
 export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete, onDevelop, onDebug, showMessage }) => {
     const [activeTab, setActiveTab] = useState('overview');
     const [revisionFilter, setRevisionFilter] = useState('');
@@ -1887,7 +1900,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                 setDeployModalOpen(false);
             } else {
                 const errorText = await response.text();
-                throw new Error(errorText || `Deployment failed with status ${response.status}`);
+                throw new Error(parseApigeeErrorMessage(errorText) || `Deployment failed with status ${response.status}`);
             }
         } catch (err) {
             console.error('Deploy error:', err);

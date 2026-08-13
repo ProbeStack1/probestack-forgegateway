@@ -17,6 +17,19 @@ import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingI
 import API_BASE_URL from "../../config/apiConfig";
 import { getProjects, getApplications } from "../../http-service/onboardingApi";
 
+// Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
+// buried inside the fetch response's text body — surface the specific violation (e.g. which
+// proxy/revision owns a conflicting base path) instead of dumping the whole JSON blob at the user.
+const parseApigeeErrorMessage = (text) => {
+    try {
+        const parsed = JSON.parse(text);
+        const violation = parsed?.error?.details?.flatMap((d) => d.violations || [])?.[0];
+        return violation?.description || parsed?.error?.message || text;
+    } catch {
+        return text;
+    }
+};
+
 export const ProxiesView = ({ showMessage }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -993,7 +1006,10 @@ ${declaredResources.map((r, idx) => {
                             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
                             body: JSON.stringify({ override: true }),
                         });
-                        if (!deployRes.ok) throw new Error((await deployRes.text()) || `HTTP ${deployRes.status}`);
+                        if (!deployRes.ok) {
+                            const errText = await deployRes.text();
+                            throw new Error(parseApigeeErrorMessage(errText) || `HTTP ${deployRes.status}`);
+                        }
                         showMessage(`Deployed revision ${revisionToDeploy} to "${env}"`, "success");
                     } catch (err) {
                         showMessage(`Deployment to "${env}" failed: ${err.message}`, "error");

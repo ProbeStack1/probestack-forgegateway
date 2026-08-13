@@ -956,7 +956,12 @@ ${declaredResources.map((r, idx) => {
             await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
                 method: "POST",
                 headers: getTrackingHeaders({
-                    onboardingId: defaultOnboardingId,
+                    // defaultOnboardingId is a legacy onboarding-context record, which doesn't
+                    // exist for every Project/Application — fall back explicitly to the SSO
+                    // identity main.jsx's hydrateAuthContextFromUrl() writes into localStorage
+                    // (organizationId, or userEmail if that's unset) rather than substituting
+                    // an unrelated Project/Application id here.
+                    onboardingId: defaultOnboardingId || getFallbackOnboardingId(),
                     microserviceId: defaultMicroserviceId,
                     projectId: selectedCreateProxyProjectId,
                     projectName: selectedCreateProxyProject?.name,
@@ -972,6 +977,30 @@ ${declaredResources.map((r, idx) => {
             });
 
             showMessage(`API "${modal.name}" created successfully!`, "success");
+
+            // Deploy to whatever environments the user checked in "Deployment Environments" —
+            // import alone never deploys anything, so without this the proxy would sit
+            // revision-only and the Overview page's Deployments/API URL sections would have
+            // nothing to show. Apigee assigns the actual revision number on import; a fresh
+            // proxy name is always "1", but read it back from the import response to be safe.
+            if (modal.deploymentEnvs.length > 0) {
+                const revisionToDeploy = createdApi.revision || "1";
+                for (const env of modal.deploymentEnvs) {
+                    try {
+                        const deployUrl = `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/environments/${encodeURIComponent(env)}/apis/${encodeURIComponent(modal.name)}/revisions/${revisionToDeploy}/deployments?override=true`;
+                        const deployRes = await fetch(deployUrl, {
+                            method: "POST",
+                            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                            body: JSON.stringify({ override: true }),
+                        });
+                        if (!deployRes.ok) throw new Error((await deployRes.text()) || `HTTP ${deployRes.status}`);
+                        showMessage(`Deployed revision ${revisionToDeploy} to "${env}"`, "success");
+                    } catch (err) {
+                        showMessage(`Deployment to "${env}" failed: ${err.message}`, "error");
+                    }
+                }
+            }
+
             if (selectedProducts.length > 0) {
                 for (const prodName of selectedProducts) {
                     try {

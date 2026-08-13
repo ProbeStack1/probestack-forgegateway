@@ -189,6 +189,14 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     const [loadingEndpointDetails, setLoadingEndpointDetails] = useState(false);
     const [expandedEndpoints, setExpandedEndpoints] = useState({});
 
+    // Apigee returns no field for a proxy's URL — it's composed from two unrelated places.
+    // This org talks to apigee.googleapis.com, i.e. Apigee X/hybrid, where the host half
+    // comes from environment GROUPS (not the Edge-only "virtualhosts" resource, which
+    // 404s on X): every hostname of every envgroup attached to the deployed environment.
+    // { [environment]: string[] of hostnames }
+    const [envGroupHostnames, setEnvGroupHostnames] = useState({});
+    const [loadingEnvGroups, setLoadingEnvGroups] = useState(false);
+
     const fetchForgesfereInfo = async (resourceId) => {
         setLoadingForgesfere(true);
         try {
@@ -546,25 +554,39 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     };
 
     const getBasePath = () => {
+        const primaryEndpoint = proxyEndpoints.find((ep) => ep.name === 'default') || proxyEndpoints[0];
+        if (primaryEndpoint?.basePath) return primaryEndpoint.basePath;
         const latestData = getLatestRevisionData();
         return latestData?.basepaths?.[0] || '/';
     };
 
-    // Apigee's eval/trial default runtime hostname pattern — same convention used on the
-    // API Test page (`${org}-${env}.apigee.net`) — combined with the deployed base path.
-    const getDeploymentUrl = (dep) => {
-        if (!dep?.environment) return null;
-        const basePath = getBasePath();
-        return `https://gen-ai-poc-onboarding-${dep.environment}.apigee.net${basePath === '/' ? '' : basePath}`;
-    };
-
-    // Apigee's revision JSON has no "service.url" field — the real, testable API URL only
-    // exists once the proxy is deployed to an environment, so derive one per active deployment.
+    // No Apigee endpoint returns a proxy's URL — it's composed from two unrelated places:
+    // the host comes from every environment group attached to the deployed environment
+    // (fetched above into envGroupHostnames), the path comes from the proxy endpoint's
+    // basePath. An environment can sit in more than one envgroup, so it can resolve to
+    // more than one hostname/URL. An undeployed proxy (no entries in deployments[])
+    // composes nothing rather than a URL that won't answer.
     const getApiUrls = () => {
         const deployments = proxyDetails?.deployments?.deployments || [];
-        return deployments
-            .map((dep) => ({ environment: dep.environment, url: getDeploymentUrl(dep) }))
-            .filter((entry) => entry.url);
+        if (deployments.length === 0) return [];
+        const primaryEndpoint = proxyEndpoints.find((ep) => ep.name === 'default') || proxyEndpoints[0];
+        if (!primaryEndpoint) return [];
+        const basePath = primaryEndpoint.basePath || '/';
+        const envs = [...new Set(deployments.map((d) => d.environment).filter(Boolean))];
+
+        const urls = [];
+        envs.forEach((environment) => {
+            (envGroupHostnames[environment] || []).forEach((host) => {
+                urls.push({ environment, host, url: `https://${host}${basePath === '/' ? '' : basePath}` });
+            });
+        });
+        return urls;
+    };
+
+    // URLs for one deployment row (an environment can resolve to more than one hostname).
+    const getDeploymentUrls = (dep) => {
+        if (!dep?.environment) return [];
+        return getApiUrls().filter((u) => u.environment === dep.environment);
     };
 
     const getDeployedEnvironments = () => {
@@ -1594,6 +1616,90 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         return () => { cancelled = true; };
     }, [proxy?.name, proxyDetails?.proxy?.latestRevisionId]);
 
+    // Resolve the host half of the proxy's URL. This org is Apigee X/hybrid (it talks to
+    // apigee.googleapis.com), where hostnames live on ENVIRONMENT GROUPS, not the Edge-only
+    // "virtualhosts" resource (404s here — that API only exists on classic Edge orgs at
+    // api.enterprise.apigee.com). An environment's hostnames = the hostnames[] of every
+    // envgroup it's attached to:
+    //   GET .../envgroups                       -> [{ name, hostnames[] }]
+    //   GET .../envgroups/{name}/attachments     -> [{ environment }]
+    useEffect(() => {
+        const deployedEnvs = [...new Set((proxyDetails?.deployments?.deployments || []).map((d) => d.environment).filter(Boolean))];
+        if (deployedEnvs.length === 0) return;
+        if (deployedEnvs.every((env) => env in envGroupHostnames)) return;
+
+        // Same org every other call on this page uses to fetch this proxy — deliberately not
+        // `selectedOrg`, which is fetched independently for the Deploy dialog and can resolve
+        // to a different org than the one this proxy actually lives in.
+        const org = 'gen-ai-poc-onboarding';
+        let cancelled = false;
+        const loadEnvGroupHostnames = async () => {
+            setLoadingEnvGroups(true);
+            try {
+                const token = await fetchToken();
+                if (!token) return;
+                const groupsRes = await fetch(`https://apigee.googleapis.com/v1/organizations/${org}/envgroups`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!groupsRes.ok) {
+                    console.warn(`[ProxyDetailView] envgroups lookup failed: HTTP ${groupsRes.status}`);
+                    return;
+                }
+                const groups = (await groupsRes.json()).environmentGroups || [];
+
+                const perGroup = await Promise.all(groups.map(async (group) => {
+                    try {
+                        const res = await fetch(`https://apigee.googleapis.com/v1/organizations/${org}/envgroups/${group.name}/attachments`, {
+                            headers: { Authorization: `Bearer ${token}` },
+                        });
+                        if (!res.ok) {
+                            console.warn(`[ProxyDetailView] envgroup attachments lookup failed for ${group.name}: HTTP ${res.status}`);
+                            return { group, environments: [] };
+                        }
+                        const environments = ((await res.json()).environmentGroupAttachments || [])
+                            .map((a) => a.environment).filter(Boolean);
+                        return { group, environments };
+                    } catch (err) {
+                        console.warn(`[ProxyDetailView] envgroup attachments lookup error for ${group.name}:`, err.message);
+                        return { group, environments: [] };
+                    }
+                }));
+
+                const hostnamesByEnv = {};
+                perGroup.forEach(({ group, environments }) => {
+                    environments.forEach((env) => {
+                        hostnamesByEnv[env] = [...new Set([...(hostnamesByEnv[env] || []), ...(group.hostnames || [])])];
+                    });
+                });
+                // Cache every deployed env even if it landed in no group, so a bare
+                // environment (no envgroup, no URL) doesn't get re-fetched forever.
+                deployedEnvs.forEach((env) => { if (!(env in hostnamesByEnv)) hostnamesByEnv[env] = []; });
+
+                if (cancelled) return;
+                setEnvGroupHostnames((prev) => ({ ...prev, ...hostnamesByEnv }));
+            } finally {
+                if (!cancelled) setLoadingEnvGroups(false);
+            }
+        };
+
+        loadEnvGroupHostnames();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [proxyDetails?.deployments]);
+
+    // "Used by Proxy Endpoints" isn't a field on the target endpoint — invert every
+    // proxy endpoint's routeRules[].targetEndpoint mapping to derive it.
+    const targetEndpointUsage = useMemo(() => {
+        const map = {};
+        proxyEndpoints.forEach((ep) => {
+            (ep.targetEndpoints || []).forEach((t) => {
+                if (!map[t]) map[t] = [];
+                map[t].push(ep.name);
+            });
+        });
+        return map;
+    }, [proxyEndpoints]);
+
     const toggleEndpointExpanded = (name) => setExpandedEndpoints((prev) => ({ ...prev, [name]: !prev[name] }));
     const expandAllEndpoints = () => setExpandedEndpoints(Object.fromEntries(proxyEndpoints.map((ep) => [ep.name, true])));
     const collapseAllEndpoints = () => setExpandedEndpoints(Object.fromEntries(proxyEndpoints.map((ep) => [ep.name, false])));
@@ -2291,8 +2397,8 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <span className="text-xs text-slate-400 flex-shrink-0 mt-1">API URL</span>
                                             <div className="flex flex-col items-end gap-1.5 max-w-[65%]">
                                                 {getApiUrls().length > 0 ? (
-                                                    getApiUrls().map(({ environment, url }) => (
-                                                        <div key={environment} className="flex items-center gap-2 justify-end">
+                                                    getApiUrls().map(({ environment, host, url }) => (
+                                                        <div key={`${environment}-${host}`} className="flex items-center gap-2 justify-end">
                                                             <span className="text-[10px] uppercase tracking-wide bg-[#2a3550] text-slate-300 px-1.5 py-0.5 rounded-full flex-shrink-0">
                                                                 {environment}
                                                             </span>
@@ -2306,6 +2412,8 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                             </a>
                                                         </div>
                                                     ))
+                                                ) : loadingEnvGroups && (proxyDetails?.deployments?.deployments?.length > 0) ? (
+                                                    <span className="text-sm text-slate-500">Resolving…</span>
                                                 ) : (
                                                     <span className="text-sm text-slate-500">Not deployed</span>
                                                 )}
@@ -2444,16 +2552,23 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                             </span>
                                                         </td>
                                                         <td className="p-3">
-                                                            {getDeploymentUrl(dep) ? (
-                                                                <a
-                                                                    href={getDeploymentUrl(dep)}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                    className="text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
-                                                                >
-                                                                    {getDeploymentUrl(dep)}
-                                                                </a>
+                                                            {getDeploymentUrls(dep).length > 0 ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    {getDeploymentUrls(dep).map(({ host, url }) => (
+                                                                        <a
+                                                                            key={host}
+                                                                            href={url}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            className="text-[#4f8ef7] hover:text-[#6ca9ff] hover:underline break-all"
+                                                                        >
+                                                                            {url}
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            ) : loadingEnvGroups ? (
+                                                                <span className="text-slate-500">Resolving…</span>
                                                             ) : '—'}
                                                         </td>
                                                     </tr>
@@ -2565,6 +2680,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <tr>
                                                 <th className="text-left p-3 text-[#5a6a8a] font-medium">Name</th>
                                                 <th className="text-left p-3 text-[#5a6a8a] font-medium">Target</th>
+                                                <th className="text-left p-3 text-[#5a6a8a] font-medium">Used by Proxy Endpoints</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -2573,13 +2689,16 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                     <tr key={te.name} className="border-b border-[#1f2840] hover:bg-[#1a1f2e]/50 transition">
                                                         <td className="p-3 font-mono text-white">{te.name}</td>
                                                         <td className="p-3 font-mono text-xs text-slate-400 break-all">
-                                                            {te.url || (te.targetServer ? `Backend Service: ${te.targetServer}` : '—')}
+                                                            {te.url || (te.targetServer ? `Backend Service: ${te.targetServer}` : 'none')}
+                                                        </td>
+                                                        <td className="p-3 font-mono text-xs text-[#4f8ef7]">
+                                                            {(targetEndpointUsage[te.name] || []).join(', ') || '—'}
                                                         </td>
                                                     </tr>
                                                 ))
                                             ) : (
                                                 <tr>
-                                                    <td colSpan="2" className="p-8 text-center text-slate-400">
+                                                    <td colSpan="3" className="p-8 text-center text-slate-400">
                                                         <Globe className="h-8 w-8 mx-auto mb-2 text-slate-600" />
                                                         <p>No target endpoints found</p>
                                                     </td>

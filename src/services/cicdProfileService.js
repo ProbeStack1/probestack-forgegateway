@@ -161,6 +161,15 @@ export const deleteProfile = async (profileId) => {
   }
 };
 
+export const updateProfile = async (profileId, payload) => {
+  try {
+    const res = await axiosInstance.put(`${CICD_BASE}/profiles/${profileId}`, payload);
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, error: pickError(err, 'Failed to update profile') };
+  }
+};
+
 // ─── TEST CONNECTIONS ──────────────────────────────────────────────────
 
 export const testApigeeConnection = async (payload) => {
@@ -198,6 +207,7 @@ export const cicdProfileService = {
   createProfile,
   listProfiles,
   getProfile,
+  updateProfile,
   deleteProfile,
   testApigeeConnection,
   testKongConnection,

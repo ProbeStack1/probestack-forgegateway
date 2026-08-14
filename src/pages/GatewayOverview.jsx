@@ -37,6 +37,7 @@ import {
   BarChart2,
   KeyRound,
   FolderTree,
+  GitMerge,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { fetchApigeeToken } from "../services/apigeeToken";
@@ -70,6 +71,7 @@ import { AddProxiesView } from "./Gateway/AddProxiesView";
 import { DevelopersView } from "./Gateway/DevelopersView";
 import {OwaspSecurityFramework} from "./Gateway/Owasp";
 import GatewayAuditLogs from "./Gateway/GatewayAuditLogs";
+import CicdAutomationPage from "./CicdAutomationPage";
 import { SharedFlowDetailView } from "./Gateway/SharedFlowDetailView";
 import GovernanceTabsPage from "./Gateway/GovernanceTabsPage";
 
@@ -109,6 +111,7 @@ const GATEWAY_MENU_PATHS = {
   "observability-report": "observability-report",
   environments: "environments",
   "gateway-env": "gateway-env",
+  "cicd-automation": "cicd-automation",
   "gateway-profile": "profile",
   "ai-gateway": "ai-gateway",
   "mcp-gateway": "mcp-gateway",
@@ -126,11 +129,11 @@ const GATEWAY_PATH_MENU = Object.fromEntries(
 const getGatewayMenuFromPath = (pathname) => {
   const match = pathname.match(/^\/gateway\/([^/]+)/);
   const section = match ? match[1] : "";
-  return GATEWAY_PATH_MENU[section] || "gateway-onboarding";
+  return GATEWAY_PATH_MENU[section] || "gateway-dashboard";
 };
 
 const getGatewayPath = (menuItem) =>
-  `/gateway/${GATEWAY_MENU_PATHS[menuItem] || GATEWAY_MENU_PATHS["gateway-onboarding"]}`;
+  `/gateway/${GATEWAY_MENU_PATHS[menuItem] || GATEWAY_MENU_PATHS["gateway-dashboard"]}`;
 
 // ====================== Wrapper for ProxyDetailView ======================
 export const ProxyDetailViewWrapper = ({ showMessage, backPath = '/gateway/proxy' }) => {
@@ -222,7 +225,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
   const location = useLocation();
 
   // Sidebar state
-  const [selectedMenuItem, setSelectedMenuItem] = useState("gateway-onboarding");
+  const [selectedMenuItem, setSelectedMenuItem] = useState("gateway-dashboard");
   const [pinned, setPinned] = useState(() => {
     try { return localStorage.getItem('fs_gateway_sidebar_pinned') === 'true'; } catch { return false; }
   });
@@ -603,6 +606,13 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                   <Aperture className={sidebarIconClass(selectedMenuItem === "gateway-env", "text-lime-500")} />
                   {!sidebarCollapsed && <span>Gateway</span>}
                 </div>
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "cicd-automation")}
+                  onClick={() => selectSidebarMenu("cicd-automation")}
+                >
+                  <GitMerge className={sidebarIconClass(selectedMenuItem === "cicd-automation", "text-orange-400")} />
+                  {!sidebarCollapsed && <span>CI/CD Automation</span>}
+                </div>
               </div>
             )}
           </div>
@@ -722,12 +732,13 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="automation" element={<Automation showHeader={false} />} />
             <Route path="environments" element={<ApigeeMainPage showHeader={false} />} />
             <Route path="gateway-env" element={<GatewayEnvironmentsView showMessage={showMessage} />} />
+            <Route path="cicd-automation" element={<CicdAutomationPage />} />
             <Route path="api-deploy" element={<APIDeploy showHeader={false} isGateway={true} />} />
             <Route path="proxy-test" element={<APITest showHeader={false} isGateway={true} />} />
             <Route path="profile" element={<Profile showHeader={false} />} />
             <Route path="audit-logs" element={<GatewayAuditLogs />} />
             {/* Default redirect */}
-            <Route path="*" element={<Navigate to="/gateway/onboarding" replace />} />
+            <Route path="*" element={<Navigate to="/gateway/dashboard" replace />} />
           </Routes>
         </div>
       </div>

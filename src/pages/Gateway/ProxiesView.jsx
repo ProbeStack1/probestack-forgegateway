@@ -6,6 +6,7 @@ import {
     AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
+import { cn } from "../../lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../../components/ui/dialog";
 import { fetchApigeeToken } from "../../services/apigeeToken";
 import { fetchApigeeBreakdown } from "../../services/apigeeStatsService";
@@ -29,6 +30,25 @@ const parseApigeeErrorMessage = (text) => {
         return text;
     }
 };
+
+// Mirrors APIDeploy.jsx's DeployPathCard visual language for the "how should this
+// be applied" chooser (Management API vs CI/CD Pipeline) shown after Create Proxy.
+const DeployModeCard = ({ active, title, description, detail, onClick }) => (
+    <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+            "rounded-xl border p-4 text-left transition",
+            active
+                ? "border-[#ff5b1f]/50 bg-[#ff5b1f]/10 shadow-[0_16px_36px_rgba(255,91,31,0.12)]"
+                : "border-[#27314e] bg-[#0f1117]/60 hover:border-[#3a4668] hover:bg-[#151a2b]"
+        )}
+    >
+        <p className="text-sm font-semibold text-white">{title}</p>
+        <p className="mt-1 text-sm leading-5 text-slate-400">{description}</p>
+        {detail && <p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p>}
+    </button>
+);
 
 export const ProxiesView = ({ showMessage }) => {
     const navigate = useNavigate();
@@ -90,6 +110,10 @@ export const ProxiesView = ({ showMessage }) => {
     };
     const [createProxyModal, setCreateProxyModal] = useState(defaultCreateProxyModal);
     const resetCreateProxyModal = () => setCreateProxyModal({ ...defaultCreateProxyModal });
+    // Deployment-mode chooser ("Management API" vs "CI/CD Pipeline") shown after the
+    // Create Proxy form, Apigee X context only — mirrors APIDeploy.jsx's promote/rollback chooser.
+    const [deployModeStep, setDeployModeStep] = useState(false);
+    const [deployMode, setDeployMode] = useState("cicd"); // "direct" | "cicd"
     const [availableCreateEnvs, setAvailableCreateEnvs] = useState([]);
     const [loadingCreateEnvs, setLoadingCreateEnvs] = useState(false);
     const [fieldErrors, setFieldErrors] = useState({ name: "", basePath: "", version: "" });
@@ -1045,11 +1069,36 @@ ${declaredResources.map((r, idx) => {
         navigate(`${proxyBasePath}/proxy/${proxy.name}`, { state: { proxy } });
     };
 
+    // Advances the Create Proxy dialog to the "Management API vs CI/CD Pipeline"
+    // chooser (Apigee X only). Only checks the env/project/application selection —
+    // the rest of the form is only relevant to the direct Management API path and
+    // is validated by createProxy() itself when that path is chosen.
+    const handleContinueToDeployMode = () => {
+        if (!createProxyEnv || !selectedCreateProxyProjectId || !selectedCreateProxyApplicationId) {
+            showMessage("Please select an Environment, Project and Application.", "error");
+            return;
+        }
+        setDeployModeStep(true);
+    };
+
+    // "CI/CD Pipeline" chosen: no Apigee call is made here — hand off to the CI/CD
+    // Automation page (Management section) to configure/save the pipeline for this
+    // application, pre-scoped via ?appId=.
+    const handleContinueToCicd = () => {
+        const appId = selectedCreateProxyApplicationId;
+        closeCreateProxyModal();
+        // Stay within the current app shell (this chooser only ever shows for the
+        // "/gateway" Apigee X context) rather than jumping to the top-level page.
+        navigate(`${proxyBasePath}/cicd-automation${appId ? `?appId=${encodeURIComponent(appId)}` : ""}`);
+    };
+
     // Closes the Create Proxy modal and clears every field it seeded, so a
     // reopen (whether via Cancel, the X icon, or a backdrop click) never
     // shows data left over from a previous session.
     const closeCreateProxyModal = () => {
         resetCreateProxyModal();
+        setDeployModeStep(false);
+        setDeployMode("cicd");
         setProductOption("existing");
         setSelectedProducts([]);
         setProductModalOpen(false);
@@ -1251,11 +1300,11 @@ ${declaredResources.map((r, idx) => {
                 </div>
             ) : (
                 <>
-                    <div className="overflow-hidden rounded-lg border border-dark-700">
+                    <div className="overflow-x-auto rounded-lg border border-dark-700">
                         <table className="w-full text-sm">
                             <thead className="bg-dark-800/70 border-b border-dark-700">
                                 <tr>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium w-[220px]">Name</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium w-[160px]">Name</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Type</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">
                                         <div className="flex items-center gap-2">
@@ -1279,14 +1328,16 @@ ${declaredResources.map((r, idx) => {
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Last Modified</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium">Modified By</th>
                                     <th className="text-left p-3 text-[#5a6a8a] font-medium whitespace-nowrap">Source</th>
-                                    <th className="text-left p-3 text-[#5a6a8a] font-medium whitespace-nowrap">Actions</th>
+                                    <th className="text-left p-3 text-[#5a6a8a] font-medium whitespace-nowrap w-[190px]">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedProxies.map((proxy) => (
                                     <tr key={proxy.name} className="border-b border-dark-700 hover:bg-dark-800/40 cursor-pointer" onClick={() => handleProxySelect(proxy)}>
                                         <td className="p-3 text-white font-mono text-sm">
-                                            <span className="block max-w-[220px] truncate" title={proxy.name}>{proxy.name}</span>
+                                            <span title={proxy.name}>
+                                                {proxy.name && proxy.name.length > 15 ? `${proxy.name.slice(0, 15)}…` : proxy.name}
+                                            </span>
                                         </td>
                                         <td className="p-3">
                                             <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${(proxy.type || "REST") === "REST" ? "bg-blue-500/20 text-blue-300" :
@@ -1360,6 +1411,8 @@ ${declaredResources.map((r, idx) => {
                             <DialogDescription className="text-slate-400">Configure your API details, deployment environments, and service account.</DialogDescription>
                         </DialogHeader>
                     </div>
+                    {!deployModeStep && (
+                    <>
                     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
                         {/* API Type */}
                         <div>
@@ -1640,31 +1693,46 @@ ${declaredResources.map((r, idx) => {
                                                 ))}
                                             </div>
                                         </div>
-                                        {/* Security */}
+                                        {/* Security — mutually exclusive, so a radio group rather than independent checkboxes */}
                                         <div>
                                             <label className="text-sm font-medium text-white">Security</label>
                                             <div className="mt-2 flex flex-wrap gap-4">
                                                 <label className="flex items-center gap-2">
                                                     <input
-                                                        type="checkbox"
-                                                        checked={createProxyModal.security.oauth2}
-                                                        onChange={(e) => setCreateProxyModal(prev => ({
+                                                        type="radio"
+                                                        name="create-proxy-security"
+                                                        checked={!createProxyModal.security.oauth2 && !createProxyModal.security.mtls}
+                                                        onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { ...prev.security, oauth2: e.target.checked },
+                                                            security: { oauth2: false, mtls: false },
                                                         }))}
-                                                        className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">None</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="create-proxy-security"
+                                                        checked={createProxyModal.security.oauth2}
+                                                        onChange={() => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            security: { oauth2: true, mtls: false },
+                                                        }))}
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
                                                     <span className="text-white">OAuth 2.0</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
-                                                        type="checkbox"
+                                                        type="radio"
+                                                        name="create-proxy-security"
                                                         checked={createProxyModal.security.mtls}
-                                                        onChange={(e) => setCreateProxyModal(prev => ({
+                                                        onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { ...prev.security, mtls: e.target.checked },
+                                                            security: { oauth2: false, mtls: true },
                                                         }))}
-                                                        className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
                                                     <span className="text-white">mTLS</span>
                                                 </label>
@@ -1852,8 +1920,53 @@ ${declaredResources.map((r, idx) => {
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
                         <Button variant="outline" onClick={closeCreateProxyModal}>Cancel</Button>
-                        <Button onClick={createProxy} className="bg-[#ff5b1f] hover:bg-[#ff6b36]">Create</Button>
+                        <Button
+                            onClick={proxyBasePath === "/gateway" ? handleContinueToDeployMode : createProxy}
+                            className="bg-[#ff5b1f] hover:bg-[#ff6b36]"
+                        >
+                            {proxyBasePath === "/gateway" ? "Continue" : "Create"}
+                        </Button>
                     </div>
+                    </>
+                    )}
+
+                    {/* Deployment-mode chooser (Apigee X only) — mirrors the Management API vs
+                        CI/CD Pipeline pattern used for promote/rollback in APIDeploy.jsx */}
+                    {deployModeStep && (
+                    <>
+                    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+                        <div>
+                            <h3 className="text-base font-semibold text-white">How should this proxy be applied?</h3>
+                            <p className="mt-1 text-sm text-slate-400">Choose how ForgeGateway pushes "{createProxyModal.name}" to Apigee X.</p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <DeployModeCard
+                                active={deployMode === "cicd"}
+                                title="CI/CD Pipeline"
+                                description="Commit the configuration and let your pipeline deploy it."
+                                detail="ForgeGateway hands off to your configured CI/CD pipeline. You'll confirm or configure the pipeline for this application next; every change goes through the usual review and rollback path."
+                                onClick={() => setDeployMode("cicd")}
+                            />
+                            <DeployModeCard
+                                active={deployMode === "direct"}
+                                title="Management API"
+                                description="Apply changes directly to the gateway."
+                                detail="ForgeGateway calls the gateway's management API itself. Changes take effect as soon as this finishes, and nothing is written to a configuration repository."
+                                onClick={() => setDeployMode("direct")}
+                            />
+                        </div>
+                    </div>
+                    <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
+                        <Button variant="outline" onClick={() => setDeployModeStep(false)}>Back to Customize</Button>
+                        <Button
+                            onClick={deployMode === "cicd" ? handleContinueToCicd : createProxy}
+                            className="bg-[#ff5b1f] hover:bg-[#ff6b36]"
+                        >
+                            {deployMode === "cicd" ? "Continue to Pipeline Setup" : "Create Proxy"}
+                        </Button>
+                    </div>
+                    </>
+                    )}
                 </DialogContent>
             </Dialog>
 

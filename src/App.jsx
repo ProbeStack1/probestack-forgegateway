@@ -9,6 +9,7 @@ import APIDeploy from './pages/APIDeploy';
 import APITest from './pages/APITest';
 import Profile from './pages/Profile';
 import AuditLogs from './pages/AuditLogs';
+import CicdAutomationPage from './pages/CicdAutomationPage';
 import Governance from './pages/Governance';
 import { ApigeeXConfig } from './pages/config/ApigeeXConfig';
 import { KongKonnectConfig } from './pages/config/KongKonnectConfig';
@@ -89,6 +90,7 @@ function AuthHandler() {
         <Route path="/testing" element={<Test />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/audit-logs" element={<AuditLogs />} />
+        <Route path="/cicd-automation" element={<CicdAutomationPage />} />
         <Route path="/config/apigee-x" element={<ApigeeXConfig />} />
         <Route path="/config/apigee-x/add" element={<ApigeeXConfig />} />
         <Route path="/config/kong" element={<KongKonnectConfig />} />

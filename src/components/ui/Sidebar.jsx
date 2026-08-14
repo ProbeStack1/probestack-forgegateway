@@ -4,7 +4,7 @@ import {
   Layers, TestTube, Rocket, Shield,
   ChevronRight, ChevronLeft, Activity, Zap, ClipboardCheck,
   Server as ServerIcon, Globe, Cpu,
-  ScrollText,
+  ScrollText, GitMerge,
   AlertCircle, Clock, Database, Target, BarChart2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -70,6 +70,7 @@ const navSections = [
     header: 'Management',
     items: [
       { id: 'audit-logs', label: 'Audit Logs', icon: ScrollText, path: '/audit-logs' },
+      { id: 'cicd-automation', label: 'CI/CD Automation', icon: GitMerge, path: '/cicd-automation' },
     ],
   },
   {
@@ -208,6 +209,7 @@ export default function Sidebar({ activePage, isMobileOpen, onMobileClose }) {
     switch (item.id) {
       case 'proxy-manager':         return isProxyPath(p);
       case 'audit-logs':            return p === '/audit-logs';
+      case 'cicd-automation':       return p.startsWith('/cicd-automation');
       case 'api-deploy':            return p.startsWith('/api-deploy');
       case 'test':                  return isTestPath(p);
       case 'governance':            return isGovernancePath(p);

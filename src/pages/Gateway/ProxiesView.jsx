@@ -89,6 +89,9 @@ export const ProxiesView = ({ showMessage }) => {
     // Traffic column (per-proxy request count over a selectable time range)
     const [trafficRange, setTrafficRange] = useState("1 day");
     const [trafficByProxy, setTrafficByProxy] = useState({});
+    // When no single environment is selected, traffic is broken down per-env instead:
+    // { [proxyName]: [{ env, count }, ...] } sorted by count descending.
+    const [trafficByProxyPerEnv, setTrafficByProxyPerEnv] = useState({});
     const [trafficLoading, setTrafficLoading] = useState(false);
 
     // Create Proxy Modal State
@@ -102,7 +105,7 @@ export const ProxiesView = ({ showMessage }) => {
         zipFile: null,
         deploymentEnvs: [],
         resources: [{ method: "GET", path: "" }],
-        security: { oauth2: false, mtls: false },
+        security: { oauth2: false, mtls: false, basicAuth: true },
         apiType: "REST",
         openApiSpecFile: null,
         specParsed: false,
@@ -436,23 +439,54 @@ export const ProxiesView = ({ showMessage }) => {
         if (selectedOrg) fetchProxies();
     }, [selectedOrg]);
 
-    // Fetch traffic (request counts) per proxy for the selected environment + time range.
-    // Requires a concrete environment — analytics can't be aggregated across "All Environments".
+    // Fetch traffic (request counts) per proxy for the selected time range.
+    // With a concrete environment picked, this is a single breakdown query. With
+    // "All Environments" selected, analytics can't be aggregated server-side across
+    // envs, so query every env in parallel and keep the per-env split for display.
     const fetchProxyTraffic = async () => {
-        if (!selectedEnv || selectedEnv === "ALL" || selectedEnv === "NOT_DEPLOYED") {
+        if (!selectedEnv || selectedEnv === "NOT_DEPLOYED") {
             setTrafficByProxy({});
+            setTrafficByProxyPerEnv({});
             return;
         }
         setTrafficLoading(true);
         try {
             const token = await fetchApigeeToken();
-            const rows = await fetchApigeeBreakdown(token, selectedEnv, "apiproxy", ["sum(message_count)"], trafficRange);
-            const map = {};
-            rows.forEach((row) => { map[row.name] = row["sum(message_count)"] || 0; });
-            setTrafficByProxy(map);
+            if (selectedEnv === "ALL") {
+                if (availableCreateEnvs.length === 0) {
+                    setTrafficByProxyPerEnv({});
+                    return;
+                }
+                const perEnvResults = await Promise.all(
+                    availableCreateEnvs.map((env) =>
+                        fetchApigeeBreakdown(token, env, "apiproxy", ["sum(message_count)"], trafficRange)
+                            .then((rows) => ({ env, rows }))
+                            .catch(() => ({ env, rows: [] }))
+                    )
+                );
+                const perProxy = {};
+                perEnvResults.forEach(({ env, rows }) => {
+                    rows.forEach((row) => {
+                        const count = row["sum(message_count)"] || 0;
+                        if (!count) return;
+                        if (!perProxy[row.name]) perProxy[row.name] = [];
+                        perProxy[row.name].push({ env, count });
+                    });
+                });
+                Object.values(perProxy).forEach((list) => list.sort((a, b) => b.count - a.count));
+                setTrafficByProxyPerEnv(perProxy);
+                setTrafficByProxy({});
+            } else {
+                const rows = await fetchApigeeBreakdown(token, selectedEnv, "apiproxy", ["sum(message_count)"], trafficRange);
+                const map = {};
+                rows.forEach((row) => { map[row.name] = row["sum(message_count)"] || 0; });
+                setTrafficByProxy(map);
+                setTrafficByProxyPerEnv({});
+            }
         } catch (err) {
             console.error("Failed to fetch proxy traffic:", err);
             setTrafficByProxy({});
+            setTrafficByProxyPerEnv({});
         } finally {
             setTrafficLoading(false);
         }
@@ -460,7 +494,7 @@ export const ProxiesView = ({ showMessage }) => {
 
     useEffect(() => {
         fetchProxyTraffic();
-    }, [selectedEnv, trafficRange]);
+    }, [selectedEnv, trafficRange, availableCreateEnvs]);
 
     // Load Projects for the Create Proxy dialog whenever it's open — independent of
     // any page-level selection
@@ -500,9 +534,11 @@ export const ProxiesView = ({ showMessage }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [appPrefix]);
 
+    // Fetched page-wide (not just while the Create dialog is open) — the Traffic
+    // column's per-environment breakdown needs the env list too.
     useEffect(() => {
-        if (createProxyModal.open && selectedOrg) fetchCreateEnvironments();
-    }, [createProxyModal.open, selectedOrg]);
+        if (selectedOrg) fetchCreateEnvironments();
+    }, [selectedOrg]);
 
     // NEW: Load onboarding options for target server creation
     useEffect(() => {
@@ -635,6 +671,29 @@ export const ProxiesView = ({ showMessage }) => {
         if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
         const diffDays = Math.floor(diffHours / 24);
         return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+    };
+
+    // Deterministic color per environment name, so e.g. "prod" always renders the
+    // same badge color across rows/re-renders without needing a fixed env->color map.
+    const ENV_BADGE_COLORS = [
+        { bg: "bg-blue-500/15", text: "text-blue-300", ring: "ring-blue-500/30" },
+        { bg: "bg-emerald-500/15", text: "text-emerald-300", ring: "ring-emerald-500/30" },
+        { bg: "bg-amber-500/15", text: "text-amber-300", ring: "ring-amber-500/30" },
+        { bg: "bg-purple-500/15", text: "text-purple-300", ring: "ring-purple-500/30" },
+        { bg: "bg-pink-500/15", text: "text-pink-300", ring: "ring-pink-500/30" },
+        { bg: "bg-cyan-500/15", text: "text-cyan-300", ring: "ring-cyan-500/30" },
+    ];
+    const getEnvBadgeColor = (envName) => {
+        let hash = 0;
+        for (let i = 0; i < envName.length; i++) hash = (hash * 31 + envName.charCodeAt(i)) >>> 0;
+        return ENV_BADGE_COLORS[hash % ENV_BADGE_COLORS.length];
+    };
+
+    // Compact number formatting for traffic badges: 1,234 -> "1.2k", 2,500,000 -> "2.5M"
+    const formatCompactCount = (n) => {
+        if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+        if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+        return String(n);
     };
 
     // Generate proxy zip (unchanged)
@@ -1349,11 +1408,47 @@ ${declaredResources.map((r, idx) => {
                                             </span>
                                         </td>
                                         <td className="p-3 text-[#7f8fa8]">
-                                            {trafficLoading
-                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                : (selectedEnv === "ALL" || selectedEnv === "NOT_DEPLOYED")
-                                                    ? <span className="text-xs text-[#5a6a8a]">Select an environment</span>
-                                                    : (trafficByProxy[proxy.name] ?? 0).toLocaleString()}
+                                            {trafficLoading ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            ) : selectedEnv === "NOT_DEPLOYED" ? (
+                                                <span className="text-xs text-[#5a6a8a]">Not deployed</span>
+                                            ) : selectedEnv === "ALL" ? (
+                                                (() => {
+                                                    const perEnv = trafficByProxyPerEnv[proxy.name] || [];
+                                                    if (perEnv.length === 0) {
+                                                        return <span className="text-xs text-[#5a6a8a]">No traffic</span>;
+                                                    }
+                                                    const visible = perEnv.slice(0, 2);
+                                                    const extra = perEnv.length - visible.length;
+                                                    return (
+                                                        <div className="flex items-center gap-1.5">
+                                                            {visible.map(({ env, count }) => {
+                                                                const color = getEnvBadgeColor(env);
+                                                                return (
+                                                                    <span
+                                                                        key={env}
+                                                                        title={`${env}: ${count.toLocaleString()} requests`}
+                                                                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset ${color.bg} ${color.text} ${color.ring}`}
+                                                                    >
+                                                                        <span className="max-w-[64px] truncate uppercase tracking-wide opacity-80">{env}</span>
+                                                                        <span className="font-mono">{formatCompactCount(count)}</span>
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                            {extra > 0 && (
+                                                                <span
+                                                                    title={perEnv.slice(2).map(({ env, count }) => `${env}: ${count.toLocaleString()}`).join("\n")}
+                                                                    className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-white/5 text-[#7f8fa8] ring-1 ring-inset ring-white/10 cursor-default"
+                                                                >
+                                                                    +{extra} more
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()
+                                            ) : (
+                                                (trafficByProxy[proxy.name] ?? 0).toLocaleString()
+                                            )}
                                         </td>
                                         <td className="p-3 text-[#7f8fa8]">
                                             {proxy.lastModifiedAt ? (
@@ -1701,14 +1796,14 @@ ${declaredResources.map((r, idx) => {
                                                     <input
                                                         type="radio"
                                                         name="create-proxy-security"
-                                                        checked={!createProxyModal.security.oauth2 && !createProxyModal.security.mtls}
+                                                        checked={createProxyModal.security.basicAuth}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: false, mtls: false },
+                                                            security: { oauth2: false, mtls: false, basicAuth: true },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">None</span>
+                                                    <span className="text-white">Basic Auth</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
@@ -1717,7 +1812,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.security.oauth2}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: true, mtls: false },
+                                                            security: { oauth2: true, mtls: false, basicAuth: false },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -1730,7 +1825,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.security.mtls}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: false, mtls: true },
+                                                            security: { oauth2: false, mtls: true, basicAuth: false },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -2067,13 +2162,13 @@ ${declaredResources.map((r, idx) => {
                     setProductOption("existing"); // fallback to existing if cancelled
                 }
             }}>
-                <DialogContent className="max-w-6xl bg-[#111520] border border-[#27314e] text-white p-0 overflow-hidden">
-                    <div className="bg-gradient-to-br from-[#111520] to-[#0e121c]">
-                        <div className="px-6 pt-6 pb-4 border-b border-[#2a3550] bg-[#0f172a]/50">
+                <DialogContent className="max-w-2xl w-[90vw] max-h-[90vh] bg-[#111520] border border-[#27314e] text-white p-0 overflow-hidden flex flex-col">
+                    <div className="bg-gradient-to-br from-[#111520] to-[#0e121c] flex flex-col min-h-0 flex-1">
+                        <div className="px-6 pt-6 pb-4 border-b border-[#2a3550] bg-[#0f172a]/50 shrink-0">
                             <h2 className="text-lg font-semibold text-white">Create a new API Product</h2>
                             <p className="text-xs text-slate-400 mt-1">Basic details – you can add quotas, operations, and attributes later.</p>
                         </div>
-                        <div className="p-6 space-y-5">
+                        <div className="p-6 space-y-5 overflow-y-auto min-h-0">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-sm font-medium text-white">Name *</label>
@@ -2151,8 +2246,8 @@ ${declaredResources.map((r, idx) => {
                                 <span className="text-sm text-white">Automatically approve access requests</span>
                             </label>
                         </div>
-                        <div className="flex justify-end gap-3 px-6 py-4 border-t border-[#2a3550] bg-[#0f172a]/50">
-                            <Button variant="outline" onClick={() => setProductModalOpen(false)}>Cancel</Button>
+                        <div className="flex justify-end gap-3 px-6 py-4 border-t border-[#2a3550] bg-[#0f172a]/50 shrink-0">
+                            <Button variant="outline" onClick={() => { setProductModalOpen(false); setProductOption("existing"); }}>Cancel</Button>
                             <Button onClick={createNewProduct} className="bg-[#ff5b1f] hover:bg-[#ff6b36]">Create Product</Button>
                         </div>
                     </div>

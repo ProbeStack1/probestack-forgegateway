@@ -165,10 +165,10 @@ export default function CreateTargetServerModal({
     };
 
     return (
-        <div className="h-full fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="h-[90vh] w-[800px] rounded-xl border border-dark-700 bg-[#15192b]/95 backdrop-blur-xl shadow-lg">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="flex flex-col max-h-[90vh] w-[800px] rounded-xl border border-[#27314e] bg-[#111520] shadow-lg">
                 {/* Header */}
-                <div className="flex justify-between items-center px-6 py-4 border-b border-dark-700" style={{ height: "4.5rem" }}>
+                <div className="flex justify-between items-center px-6 py-4 border-b border-[#27314e] shrink-0">
                     <div>
                         <h2 className="text-lg font-semibold text-white">
                             {editData ? "Edit Backend Service" : "Create a Backend Service"}
@@ -183,7 +183,7 @@ export default function CreateTargetServerModal({
                 </div>
 
                 {/* Body */}
-                <div className="p-6 space-y-6 overflow-y-auto" style={{ height: "calc(100% - 9rem)" }}>
+                <div className="p-6 space-y-6 overflow-y-auto">
                     {!isGateway ? (
                         // =============== NON‑GATEWAY MODE ===============
                         <>
@@ -229,43 +229,7 @@ export default function CreateTargetServerModal({
                                 </div>
                             </div>
                         </>
-                    ) : (
-                        // =============== GATEWAY MODE ===============
-                        <div className="space-y-6">
-                            {/* <div>
-                                <label className="text-sm text-gray-400">Application</label>
-                                <input
-                                    type="text"
-                                    value={application?.name || "Not found"}
-                                    disabled
-                                    className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white opacity-70"
-                                />
-                                <p className="text-xs text-slate-500 mt-1">
-                                    Business Unit: <span className="font-mono">{businessUnit}</span>
-                                </p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                    <label className="text-sm text-gray-400">Project Id</label>
-                                    <input
-                                        type="text"
-                                        value={organization}
-                                        disabled
-                                        className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white opacity-70"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="text-sm text-gray-400">Environment</label>
-                                    <input
-                                        type="text"
-                                        value={environment}
-                                        disabled
-                                        className="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white opacity-70"
-                                    />
-                                </div>
-                            </div> */}
-                        </div>
-                    )}
+                    ) : null}
 
                     {/* Common fields for both modes */}
                     <div className="grid grid-cols-2 gap-6">
@@ -387,7 +351,7 @@ export default function CreateTargetServerModal({
                 </div>
 
                 {/* Footer */}
-                <div className="flex justify-end items-center gap-3 px-6 py-4 border-t border-dark-700" style={{ height: "4.5rem" }}>
+                <div className="flex justify-end items-center gap-3 px-6 py-4 border-t border-[#27314e] shrink-0">
                     <button
                         onClick={onClose}
                         className="px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"

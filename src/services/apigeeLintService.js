@@ -4,7 +4,7 @@ import axios from 'axios';
 // Override locally in .env: VITE_APIGEE_LINT_BASE_URL=http://localhost:8080/lint/v1
 export const APIGEE_LINT_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_APIGEE_LINT_BASE_URL) ||
-  'https://forgesphere.probestack.io/lint/v1';
+  'https://forgegateway.probestack.io/lint/v1';
 
 const lintClient = axios.create({
   baseURL: APIGEE_LINT_BASE_URL,

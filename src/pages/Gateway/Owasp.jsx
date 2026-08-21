@@ -338,7 +338,7 @@ export const OwaspSecurityFramework = () => {
       const userEmail =
         localStorage.getItem("userEmail") || "admin@forgecrux.com";
       const res = await fetch(
-        `https://forgesphere.probestack.io/gatewayonboarding/api/v1/user/${encodeURIComponent(userEmail)}/gateway-organizations`,
+        `https://forgegateway.probestack.io/gatewayonboarding/api/v1/user/${encodeURIComponent(userEmail)}/gateway-organizations`,
       );
       if (!res.ok) return;
       const result = await res.json();
@@ -362,7 +362,7 @@ export const OwaspSecurityFramework = () => {
       const effectiveOrg =
         selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
       const res = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) throw new Error(res.statusText);

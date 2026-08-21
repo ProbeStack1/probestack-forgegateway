@@ -114,7 +114,7 @@ export const DevelopersView = ({ showMessage }) => {
     try {
       const token = await fetchApigeeToken();
       const response = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers/${email}`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/developers/${email}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) return null;
@@ -132,7 +132,7 @@ export const DevelopersView = ({ showMessage }) => {
     try {
       const token = await fetchApigeeToken();
       const response = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/developers`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!response.ok) throw new Error(`Failed to fetch developers: ${response.statusText}`);
@@ -250,6 +250,29 @@ export const DevelopersView = ({ showMessage }) => {
     setSelectedDeveloper(null);
   };
 
+  // Apigee error responses are JSON ({ error: { code, message, status, ... } }),
+  // not plain text — reading the raw body directly dumps that whole blob into
+  // the toast. Extract the actual message, and special-case 409 (developer
+  // already exists) since Apigee's own message has an untranslated "{1}"
+  // placeholder in it that shouldn't be shown to the user as-is.
+  const parseDeveloperErrorMessage = async (response, fallback, email) => {
+    if (response.status === 409) {
+      return `A developer with email "${email}" already exists in this organization.`;
+    }
+    let raw = "";
+    try {
+      raw = await response.text();
+    } catch {
+      return fallback;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.error?.message || parsed?.message || raw || fallback;
+    } catch {
+      return raw || fallback;
+    }
+  };
+
   const handleCreate = async () => {
     if (!validateForm()) return;
     setSubmitting(true);
@@ -263,7 +286,7 @@ export const DevelopersView = ({ showMessage }) => {
         status: formData.status,
       };
       const response = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/developers`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },
@@ -271,8 +294,7 @@ export const DevelopersView = ({ showMessage }) => {
         }
       );
       if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || "Creation failed");
+        throw new Error(await parseDeveloperErrorMessage(response, "Creation failed", formData.email));
       }
       showMessage(`Developer "${formData.firstName} ${formData.lastName}" created successfully`, "success");
       setCreateModalOpen(false);
@@ -298,7 +320,7 @@ export const DevelopersView = ({ showMessage }) => {
         status: formData.status,
       };
       const response = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
         {
           method: "PUT",
           headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },
@@ -306,8 +328,7 @@ export const DevelopersView = ({ showMessage }) => {
         }
       );
       if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(errText || "Update failed");
+        throw new Error(await parseDeveloperErrorMessage(response, "Update failed", formData.email));
       }
       showMessage(`Developer updated successfully`, "success");
       setEditModalOpen(false);
@@ -325,7 +346,7 @@ export const DevelopersView = ({ showMessage }) => {
     try {
       const token = await fetchApigeeToken();
       const response = await fetch(
-        `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
+        `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/developers/${selectedDeveloper.userName}`,
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders({ onboardingId: org }) },

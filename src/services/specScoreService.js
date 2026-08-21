@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const SCORE_BASE_URL = 'https://forgesphere.probestack.io';
+const SCORE_BASE_URL = 'https://forgegateway.probestack.io';
 
 const scoreClient = axios.create({
   baseURL: SCORE_BASE_URL,

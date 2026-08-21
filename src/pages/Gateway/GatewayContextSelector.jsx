@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import API_BASE_URL from '../../config/apiConfig';
 import { getBusinessUnits, getProjects } from '../../http-service/onboardingApi';
+import { ONBOARDING_ORG_ID } from '../../utils/constants';
 
 // Helper to fetch Apigee token (no longer needed for env, but kept if other parts use it)
 const fetchToken = async () => {
     try {
-        const res = await fetch('https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token');
+        const res = await fetch('https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token');
         if (!res.ok) throw new Error(`Token service error: ${res.status}`);
         const data = await res.json();
         return data.access_token;
@@ -19,6 +20,11 @@ const fetchToken = async () => {
 // Get user email from localStorage or fallback
 const getUserId = () => localStorage.getItem('userEmail') || "admin@forgecrux.com";
 
+// There is only one real Apigee org in play. Every option in the "Gateway Org"
+// dropdown carries this as its value regardless of the label shown, so API
+// calls built from selectedOrg always see this exact string.
+const GATEWAY_ORG_NAME = 'gen-ai-poc-onboarding';
+
 export const GatewayContextSelector = ({
     selectedOrg,
     setSelectedOrg,
@@ -29,10 +35,12 @@ export const GatewayContextSelector = ({
     selectedEnv,
     setSelectedEnv,
     showEnv = true,
-    apiBaseUrl = 'https://forgesphere.probestack.io/apigee-wrapper', // kept for backward compatibility
-    gatewayApiBaseUrl = 'https://forgesphere.probestack.io/gatewayonboarding/api/v1', // new base for onboarding APIs
+    apiBaseUrl = 'https://forgegateway.probestack.io/apigee-wrapper', // kept for backward compatibility
+    gatewayApiBaseUrl = 'https://forgegateway.probestack.io/gatewayonboarding/api/v1', // new base for onboarding APIs
 }) => {
-    const [organizations, setOrganizations] = useState([]);
+    // { id, name } pairs: id is always GATEWAY_ORG_NAME (what API calls use),
+    // name is the display label sourced from the onboarding hierarchy.
+    const [organizations, setOrganizations] = useState([{ id: GATEWAY_ORG_NAME, name: GATEWAY_ORG_NAME }]);
     const [environments, setEnvironments] = useState([]);
     const [businessUnits, setBusinessUnits] = useState([]);
     const [projects, setProjects] = useState([]);
@@ -40,7 +48,6 @@ export const GatewayContextSelector = ({
     const [loadingEnvs, setLoadingEnvs] = useState(false);
     const [loadingBUs, setLoadingBUs] = useState(false);
     const [loadingProjects, setLoadingProjects] = useState(false);
-    const [orgNameToIdMap, setOrgNameToIdMap] = useState({});
 
     // Project selection is controlled by the parent when it cares (e.g. to filter
     // Applications elsewhere); otherwise this component tracks it internally.
@@ -50,43 +57,66 @@ export const GatewayContextSelector = ({
 
     const ALL_ENV = "ALL";
     const NOT_DEPLOYED = "NOT_DEPLOYED";
+
     // ---------- Organizations (user-specific) ----------
-    const fetchOrganizations = async () => {
-        setLoadingOrgs(true);
-        try {
-            const userEmail = getUserId();
-            const response = await fetch(
-                `${gatewayApiBaseUrl}/user/${encodeURIComponent(userEmail)}/gateway-organizations`
-            );
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const result = await response.json();
-            if (result.status === 'SUCCESS' && result.data?.gatewayOrganizations) {
-                const orgs = result.data.gatewayOrganizations;
-                const orgNames = orgs
-                    .map(o => o.name)
-                    .sort((a, b) => (b?.toLowerCase() === 'forgesphere') - (a?.toLowerCase() === 'forgesphere'));
-                const map = {};
-                orgs.forEach(o => { map[o.name] = o.id; });
-                setOrganizations(orgNames);
-                setOrgNameToIdMap(map);
-                if (!selectedOrg && orgNames[0]) setSelectedOrg(orgNames[0]);
-            } else {
-                setOrganizations([]);
+    // Disabled: this hit the legacy /gatewayonboarding gateway-organizations
+    // endpoint. There is only one real Apigee org (GATEWAY_ORG_NAME above),
+    // hardcoded instead of fetched.
+    // const fetchOrganizations = async () => {
+    //     setLoadingOrgs(true);
+    //     try {
+    //         const userEmail = getUserId();
+    //         const response = await fetch(
+    //             `${gatewayApiBaseUrl}/user/${encodeURIComponent(userEmail)}/gateway-organizations`
+    //         );
+    //         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    //         const result = await response.json();
+    //         if (result.status === 'SUCCESS' && result.data?.gatewayOrganizations) {
+    //             const orgs = result.data.gatewayOrganizations;
+    //             const orgNames = orgs
+    //                 .map(o => o.name)
+    //                 .sort((a, b) => (b?.toLowerCase() === 'forgesphere') - (a?.toLowerCase() === 'forgesphere'));
+    //             const map = {};
+    //             orgs.forEach(o => { map[o.name] = o.id; });
+    //             setOrganizations(orgNames);
+    //             setOrgNameToIdMap(map);
+    //             if (!selectedOrg && orgNames[0]) setSelectedOrg(orgNames[0]);
+    //         } else {
+    //             setOrganizations([]);
+    //         }
+    //     } catch (err) {
+    //         console.error('Error fetching gateway organizations:', err);
+    //         setOrganizations([]);
+    //     } finally {
+    //         setLoadingOrgs(false);
+    //     }
+    // };
+
+    // Display-only labels for the Gateway Org dropdown, sourced from the
+    // onboarding hierarchy's organizationId. Every option's underlying value
+    // stays GATEWAY_ORG_NAME (see the state above) — only the label differs.
+    const deriveOrgLabelsFromBusinessUnits = (buList) => {
+        const seen = new Set();
+        const orgOptions = [];
+        (buList || []).forEach((bu) => {
+            const orgId = bu.organizationId || 'unorg';
+            const label = orgId === ONBOARDING_ORG_ID ? 'ForgeCrux' : orgId;
+            if (!seen.has(label)) {
+                seen.add(label);
+                orgOptions.push({ id: GATEWAY_ORG_NAME, name: label });
             }
-        } catch (err) {
-            console.error('Error fetching gateway organizations:', err);
-            setOrganizations([]);
-        } finally {
-            setLoadingOrgs(false);
-        }
+        });
+        setOrganizations(orgOptions.length ? orgOptions : [{ id: GATEWAY_ORG_NAME, name: GATEWAY_ORG_NAME }]);
     };
 
-    // ---------- Business Units (sourced from the onboarding hierarchy, independent of Gateway Org) ----------
+    // ---------- Business Units (sourced from the onboarding hierarchy; also drives the Org labels above) ----------
     const fetchBusinessUnits = async () => {
         setLoadingBUs(true);
+        setLoadingOrgs(true);
         try {
             const buList = await getBusinessUnits(0, 200);
             setBusinessUnits(buList || []);
+            deriveOrgLabelsFromBusinessUnits(buList);
             if (!selectedBU && buList?.[0]) {
                 setSelectedBU(buList[0].id);
             }
@@ -95,6 +125,7 @@ export const GatewayContextSelector = ({
             setBusinessUnits([]);
         } finally {
             setLoadingBUs(false);
+            setLoadingOrgs(false);
         }
     };
 
@@ -117,60 +148,33 @@ export const GatewayContextSelector = ({
         }
     };
 
-    // ---------- Environment (new API) ----------
-    const fetchEnvironment = async (orgName) => {
-        if (!orgName) return;
-
-        const orgId = orgNameToIdMap[orgName];
-        if (!orgId) return;
-
+    // ---------- Environments (same Apigee endpoint other Gateway pages already use) ----------
+    const fetchEnvironments = async () => {
         setLoadingEnvs(true);
-
         try {
+            const token = await fetchToken();
             const response = await fetch(
-                `${gatewayApiBaseUrl}/gateway-organizations/${orgId}/environment-type`
+                `${apiBaseUrl}/organizations/${GATEWAY_ORG_NAME}/environments`,
+                token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
             );
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const result = await response.json();
-
-            if (
-                result.status === 'SUCCESS' &&
-                result.data?.selectedEnvironments
-            ) {
-                const envTypes = result.data.selectedEnvironments || [];
-
-                setEnvironments(envTypes);
-                setSelectedEnv('ALL');
-            } else {
-                setEnvironments([]);
-                setSelectedEnv('ALL');
-            }
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            setEnvironments(Array.isArray(data) ? data : (data.environments || []));
         } catch (err) {
-            console.error('Error fetching environment:', err);
+            console.error('Error fetching environments:', err);
             setEnvironments([]);
-            setSelectedEnv('ALL');
         } finally {
             setLoadingEnvs(false);
         }
     };
 
-    // Initial load: fetch organizations and business units (business units come
-    // from the onboarding hierarchy and aren't scoped by Gateway Org)
+    // Initial load: default the (hardcoded) org selection, then fetch business
+    // units (business units come from the onboarding hierarchy) and environments
     useEffect(() => {
-        fetchOrganizations();
+        if (!selectedOrg) setSelectedOrg(GATEWAY_ORG_NAME);
         fetchBusinessUnits();
+        if (showEnv) fetchEnvironments();
     }, []);
-
-    // When org changes, fetch environment (Gateway Org is a separate, Apigee-level concept)
-    useEffect(() => {
-        if (selectedOrg && orgNameToIdMap[selectedOrg]) {
-            if (showEnv) fetchEnvironment(selectedOrg);
-        }
-    }, [selectedOrg, orgNameToIdMap]);
 
     // When the Business Unit changes, load its Projects
     useEffect(() => {
@@ -221,8 +225,8 @@ export const GatewayContextSelector = ({
                 loading: loadingOrgs,
                 disabled: loadingOrgs,
                 placeholder: 'Select Org',
-                getOptionLabel: (org) => org,
-                getOptionValue: (org) => org,
+                getOptionLabel: (org) => org.name,
+                getOptionValue: (org) => org.id,
                 minWidth: '180px',
             })}
 
@@ -326,7 +330,7 @@ export const GatewayContextSelector = ({
 //   selectedEnv,
 //   setSelectedEnv,
 //   showEnv = true,
-//   apiBaseUrl = 'https://forgesphere.probestack.io/apigee-wrapper', // configurable
+//   apiBaseUrl = 'https://forgegateway.probestack.io/apigee-wrapper', // configurable
 // }) => {
 //   const [organizations, setOrganizations] = useState([]);
 //   const [environments, setEnvironments] = useState([]);
@@ -342,7 +346,7 @@ export const GatewayContextSelector = ({
 //     try {
 //       const userEmail = getUserId();
 //       const response = await fetch(
-//         `https://forgesphere.probestack.io/gatewayonboarding/api/v1/user/${encodeURIComponent(userEmail)}/gateway-organizations`
+//         `https://forgegateway.probestack.io/gatewayonboarding/api/v1/user/${encodeURIComponent(userEmail)}/gateway-organizations`
 //       );
 //       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 //       const result = await response.json();
@@ -373,7 +377,7 @@ export const GatewayContextSelector = ({
 //     setLoadingBUs(true);
 //     try {
 //       const response = await fetch(
-//         `https://forgesphere.probestack.io/gatewayonboarding/api/v1/gateway-organizations/${orgId}/business-units`
+//         `https://forgegateway.probestack.io/gatewayonboarding/api/v1/gateway-organizations/${orgId}/business-units`
 //       );
 //       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 //       const result = await response.json();

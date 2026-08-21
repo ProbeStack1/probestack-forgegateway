@@ -1,10 +1,10 @@
 import axios from 'axios';
 
-const DEFAULT_AGENT_BASE_URL = 'https://forgesphere.probestack.io/spec-gen-agent';
+const DEFAULT_AGENT_BASE_URL = 'https://forgegateway.probestack.io/spec-gen-agent';
 // const AGENT_BASE_URL = (
 //   import.meta.env.VITE_SPECFORGE_AGENT_BASE_URL || DEFAULT_AGENT_BASE_URL
 // ).replace(/\/+$/, '');
-const AGENT_BASE_URL = 'https://forgesphere.probestack.io/spec-gen-agent';
+const AGENT_BASE_URL = 'https://forgegateway.probestack.io/spec-gen-agent';
 
 const agentClient = axios.create({
   baseURL: AGENT_BASE_URL,

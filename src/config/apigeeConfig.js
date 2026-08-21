@@ -1,5 +1,5 @@
-const APIGEE_BASE_URL = 'https://forgesphere.probestack.io/apigee-wrapper';
-export const TOKEN_API_END_POINT = 'https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token';
+const APIGEE_BASE_URL = 'https://forgegateway.probestack.io/apigee-wrapper';
+export const TOKEN_API_END_POINT = 'https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token';
 
 export const APIGEE_ENDPOINTS = {
   APP_CREDENTIALS: {

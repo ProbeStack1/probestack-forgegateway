@@ -5,7 +5,7 @@ import axios from 'axios';
 // Override locally in .env: VITE_GOVERNANCE_BASE_URL=http://localhost:8188/compliance-api
 export const GOVERNANCE_BASE_URL =
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GOVERNANCE_BASE_URL) ||
-  'https://forgesphere.probestack.io/compliance-api';
+  'https://forgegateway.probestack.io/compliance-api';
 
 const complianceClient = axios.create({
   baseURL: GOVERNANCE_BASE_URL,

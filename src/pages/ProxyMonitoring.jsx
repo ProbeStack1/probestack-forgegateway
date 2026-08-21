@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -1029,7 +1029,7 @@ export default function ProxyMonitoring({ showHeader = true }) {
 //       if (!token) {
 //         throw new Error('Failed to obtain access token');
 //       }
-//       const response = await fetch('https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
+//       const response = await fetch('https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
 //         headers: {
 //           'Authorization': `Bearer ${token}`
 //         }

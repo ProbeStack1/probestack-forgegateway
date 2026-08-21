@@ -395,7 +395,7 @@ export const ProxiesView = ({ showMessage }) => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
         try {
             const token = await fetchApigeeToken();
-            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/environments`;
+            const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/environments`;
             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
             if (response.ok) {
                 const data = await response.json();
@@ -421,7 +421,7 @@ export const ProxiesView = ({ showMessage }) => {
         try {
             const token = await fetchApigeeToken();
             const response = await fetch(
-                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             if (!response.ok) throw new Error(`Failed to fetch proxies: ${response.statusText}`);
@@ -582,7 +582,7 @@ export const ProxiesView = ({ showMessage }) => {
         setLoadingTargetServers(true);
         try {
             const token = await fetchApigeeToken();
-            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${createProxyEnv}/targetservers`;
+            const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${createProxyEnv}/targetservers`;
             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
             if (response.ok) {
                 const data = await response.json();
@@ -940,7 +940,7 @@ ${declaredResources.map((r, idx) => {
 
     //         // Auto‑redirect to Proxy Editor (unchanged)
     //         try {
-    //             const detailsUrl = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${modal.name}/details`;
+    //             const detailsUrl = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${modal.name}/details`;
     //             const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${token}` } });
     //             if (detailsRes.ok) {
     //                 const detailsData = await detailsRes.json();
@@ -1049,7 +1049,7 @@ ${declaredResources.map((r, idx) => {
             // "apiProxyType" on a bundle-imported proxy is always "PROGRAMMABLE" and isn't useful here.
             const selectedApiType = { Rest: "REST", SOAP: "SOAP", GraphQL: "GraphQL", MCP: "MCP" }[modal.apiType] || modal.apiType;
             const createdApi = await response.clone().json().catch(() => ({ name: modal.name }));
-            await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
+            await fetch(`https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/config-audit/API/${encodeURIComponent(modal.name)}/record`, {
                 method: "POST",
                 headers: getTrackingHeaders({
                     // defaultOnboardingId is a legacy onboarding-context record, which doesn't
@@ -1201,7 +1201,7 @@ ${declaredResources.map((r, idx) => {
         try {
             const token = await fetchApigeeToken();
             const response = await fetch(
-                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`,
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             return response.ok;
@@ -1231,7 +1231,7 @@ ${declaredResources.map((r, idx) => {
 
             if (exists) {
                 // Fetch the latest revision and bundle for existing proxy
-                const detailsUrl = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${trimmed}/details`;
+                const detailsUrl = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${trimmed}/details`;
                 const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${token}` } });
                 if (!detailsRes.ok) throw new Error("Failed to fetch proxy details");
                 const detailsData = await detailsRes.json();
@@ -2345,7 +2345,7 @@ ${declaredResources.map((r, idx) => {
 //         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
 //         try {
 //             const token = await fetchApigeeToken();
-//             const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/environments`;
+//             const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/environments`;
 //             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 //             if (response.ok) {
 //                 const data = await response.json();
@@ -2371,7 +2371,7 @@ ${declaredResources.map((r, idx) => {
 //         try {
 //             const token = await fetchApigeeToken();
 //             const response = await fetch(
-//                 `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
+//                 `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/details`,
 //                 { headers: { Authorization: `Bearer ${token}` } }
 //             );
 //             if (!response.ok) throw new Error(`Failed to fetch proxies: ${response.statusText}`);
@@ -2410,7 +2410,7 @@ ${declaredResources.map((r, idx) => {
 //             setLoadingTargetServers(true);
 //             try {
 //                 const token = await fetchApigeeToken();
-//                 const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${selectedEnv}/targetservers`;
+//                 const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${orgForTarget}/environments/${selectedEnv}/targetservers`;
 //                 const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 //                 if (response.ok) {
 //                     const data = await response.json();
@@ -2752,7 +2752,7 @@ ${declaredResources.map((r, idx) => {
 //         // --- Auto‑redirect to Proxy Editor ---
 //         try {
 //             // 1. Get proxy details to fetch the latest revision
-//             const detailsUrl = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${modal.name}/details`;
+//             const detailsUrl = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${modal.name}/details`;
 //             const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${token}` } });
 //             if (detailsRes.ok) {
 //                 const detailsData = await detailsRes.json();

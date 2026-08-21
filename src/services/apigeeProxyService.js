@@ -1,9 +1,9 @@
 const TOKEN_URL = (typeof import.meta !== 'undefined' && import.meta.env?.DEV)
   ? '/dev-token/token'
-  : 'https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token';
+  : 'https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token';
 const APIGEE_BASE = (typeof import.meta !== 'undefined' && import.meta.env?.DEV)
   ? '/apigee-wrapper'
-  : 'https://forgesphere.probestack.io/apigee-wrapper';
+  : 'https://forgegateway.probestack.io/apigee-wrapper';
 
 let _cachedToken = null;
 let _tokenFetchedAt = 0;

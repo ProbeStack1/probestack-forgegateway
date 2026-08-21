@@ -9,7 +9,7 @@ import { getApplications } from '../../http-service/onboardingApi';
 // Helper to fetch Apigee token
 const fetchToken = async () => {
   try {
-    const res = await fetch('https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token');
+    const res = await fetch('https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token');
     if (!res.ok) throw new Error(`Token service error: ${res.status}`);
     const data = await res.json();
     return data.access_token;
@@ -163,7 +163,9 @@ const APIProductsManager = ({
     try {
       const token = await fetchToken();
       if (!token) throw new Error('No token');
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/apiproducts`;
+      // expand=true: without it Apigee returns bare product name strings
+      // (no displayName, description, etc.) instead of full objects.
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/apiproducts?expand=true`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -184,7 +186,7 @@ const APIProductsManager = ({
     try {
       const token = await fetchToken();
       if (!token) throw new Error('No token');
-       const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
+       const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
@@ -394,7 +396,7 @@ const APIProductsManager = ({
           return;
         }
         const payload = buildApigeePayload(formData);
-         const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
+         const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
          const res = await fetch(url, {
            method: 'POST',
            headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
@@ -407,7 +409,7 @@ const APIProductsManager = ({
         showMessage?.('Product created successfully', 'success');
       } else {
         const payload = buildApigeePayload(formData);
-         const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
+         const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
          const res = await fetch(url, {
            method: 'PUT',
            headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
@@ -432,7 +434,7 @@ const APIProductsManager = ({
     const org = getEffectiveOrg();
     try {
       const token = await fetchToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts/${encodeURIComponent(productName)}`;
       const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchProducts();
@@ -459,7 +461,7 @@ const APIProductsManager = ({
     const org = getEffectiveOrg();
     try {
       const token = await fetchToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(org)}/apiproducts`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, ...getTrackingHeaders(getTracking()) },
@@ -1091,7 +1093,7 @@ export default APIProductsManager;
 //     try {
 //       const token = await fetchToken();
 //       if (!token) throw new Error('No token');
-//       const url = (`https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/environments`);
+//       const url = (`https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/environments`);
 //       const response = await fetch(url, {
 //         headers: { 'Authorization': `Bearer ${token}` }
 //       });
@@ -1114,7 +1116,7 @@ export default APIProductsManager;
 //     try {
 //       const token = await fetchToken();
 //       if (!token) throw new Error('No token');
-//       const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${fallbackOrg}/apis`;
+//       const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${fallbackOrg}/apis`;
 //       const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
 //       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 //       const data = await response.json();

@@ -26,7 +26,7 @@ axiosInstance.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    const userEmail = localStorage.getItem('userEmail') || 'system@forgesphere.probestack.io';
+    const userEmail = localStorage.getItem('userEmail') || 'system@forgegateway.probestack.io';
     if (userEmail) {
       config.headers['X-User-Email'] = userEmail;
     }

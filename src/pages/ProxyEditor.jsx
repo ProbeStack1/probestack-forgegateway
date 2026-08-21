@@ -1747,7 +1747,7 @@ ${Array.from(policySet).map(n => `    <Policy>${n}</Policy>`).join('\n') || '   
   async function fetchKongPlugins() {
     setLoadingKongPlugins(true)
     try {
-      const kongEndpoint = 'https://forgesphere.probestack.io/kong-wrapper/v2/control-planes/9ed3fe7b-7454-43fb-89bf-8b01072094fb/core-entities/plugins?region=in'
+      const kongEndpoint = 'https://forgegateway.probestack.io/kong-wrapper/v2/control-planes/9ed3fe7b-7454-43fb-89bf-8b01072094fb/core-entities/plugins?region=in'
       const response = await axios.get(kongEndpoint)
 
       // Extract unique plugin names

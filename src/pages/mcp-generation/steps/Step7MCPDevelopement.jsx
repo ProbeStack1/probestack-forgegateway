@@ -1097,7 +1097,7 @@ function SecurityLoggingSubStep({ state, dispatch }) {
               updateAuth({ kind: 'bearer' });
               updateAdvanced({
                 rateLimit: { enabled: true, requestsPerMinute: 60 },
-                cors: { enabled: true, allowedOrigins: 'https://forgesphere.probestack.io' },
+                cors: { enabled: true, allowedOrigins: 'https://forgegateway.probestack.io' },
                 logging: { enabled: true },
                 healthCheck: { enabled: true, path: '/healthz' },
                 metrics: { enabled: true, path: '/metrics' },

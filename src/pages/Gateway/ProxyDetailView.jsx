@@ -190,7 +190,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     const [forgesphereError, setForgesfereError] = useState(null);
     const fetchToken = async () => {
         try {
-            const res = await fetch('https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token');
+            const res = await fetch('https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token');
             if (!res.ok) throw new Error(`Token service error: ${res.status}`);
             const data = await res.json();
             return data.access_token;
@@ -224,7 +224,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         try {
             const token = await fetchToken();
             if (!token) throw new Error('Failed to get token');
-            const url = `https://forgesphere.probestack.io/onboarding/v1/api/onboarding/resources/${resourceId}`;
+            const url = `https://forgegateway.probestack.io/onboarding/v1/api/onboarding/resources/${resourceId}`;
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -327,7 +327,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
             //                 "apiSpecName": "Swagger Petstore",
             //                 "name": "mock-swagger-petstore",
             //                 "mockServiceName": "mock-swagger-petstore",
-            //                 "mockServerUrl": "https://forgesphere.probestack.io/mock-api/v1/api/mocks/mock-edf36005",
+            //                 "mockServerUrl": "https://forgegateway.probestack.io/mock-api/v1/api/mocks/mock-edf36005",
             //                 "mockUrl": "mock-edf36005",
             //                 "responseLatencyMs": 0,
             //                 "delayMs": 0,
@@ -454,7 +454,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         try {
             const token = await fetchToken();
             if (!token) return;
-            const url = 'https://forgesphere.probestack.io/apigee-wrapper/organizations';
+            const url = 'https://forgegateway.probestack.io/apigee-wrapper/organizations';
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -495,7 +495,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         try {
             const token = await fetchToken();
             if (!token) return;
-            const url = (`https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgName}/environments`);
+            const url = (`https://forgegateway.probestack.io/apigee-wrapper/organizations/${orgName}/environments`);
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -695,7 +695,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         try {
             const token = await fetchApigeeToken();
             // 1. Get proxy details to fetch the latest revision
-            const detailsUrl = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`;
+            const detailsUrl = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`;
             const detailsRes = await fetch(detailsUrl, { headers: { Authorization: `Bearer ${token}` } });
             if (!detailsRes.ok) throw new Error("Failed to fetch proxy details");
             const detailsData = await detailsRes.json();
@@ -1535,7 +1535,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                 const token = await fetchToken();
                 if (!token) throw new Error('Failed to obtain access token');
 
-                const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/details`;
+                const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/details`;
                 const response = await fetch(url, {
                     // Tracking headers let the backend opportunistically record who's
                     // viewing a proxy that has no Created By / Modified By yet (proxies

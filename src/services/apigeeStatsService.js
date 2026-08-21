@@ -3,7 +3,7 @@
 // Auth token + proxy list still go through the internal apigee-wrapper backend.
 
 export const APIGEE_ORG = 'gen-ai-poc-onboarding';
-const APIGEE_WRAPPER_BASE = 'https://forgesphere.probestack.io/apigee-wrapper';
+const APIGEE_WRAPPER_BASE = 'https://forgegateway.probestack.io/apigee-wrapper';
 const TOKEN_URL = `${APIGEE_WRAPPER_BASE}/auth/apigee/token`;
 const PROXIES_URL = `${APIGEE_WRAPPER_BASE}/organizations/${APIGEE_ORG}/apis/details`;
 

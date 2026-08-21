@@ -1,4 +1,4 @@
-const API_BASE_URL = 'https://forgesphere.probestack.io';
+const API_BASE_URL = 'https://forgegateway.probestack.io';
 
 export const API_ENDPOINTS = {
   CONSUMERS: {

@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -1480,14 +1480,14 @@ const LintingBody = ({ assetType, selectedResource, resourceObject, showMessage,
       try {
         // ── Apigee proxy: fetch via lifecycle/token flow ──
         if (assetType === 'APIGEE_PROXY') {
-          const tokenRes = await fetch('https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token');
+          const tokenRes = await fetch('https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token');
           if (!tokenRes.ok) throw new Error(`Token service error: ${tokenRes.status}`);
           const { access_token: token } = await tokenRes.json();
 
           // Caller passes the resource object with raw.orgName if known; else fall back to default org.
           const orgName = resourceObject?.raw?.orgName || resourceObject?.orgName || 'gen-ai-poc-onboarding';
           const detailsRes = await fetch(
-            `https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgName}/apis/details`,
+            `https://forgegateway.probestack.io/apigee-wrapper/organizations/${orgName}/apis/details`,
             { headers: { Authorization: `Bearer ${token}` } },
           );
           if (!detailsRes.ok) throw new Error(`Failed to load proxy details: HTTP ${detailsRes.status}`);
@@ -1499,7 +1499,7 @@ const LintingBody = ({ assetType, selectedResource, resourceObject, showMessage,
             return;
           }
           const resourceRes = await fetch(
-            `https://forgesphere.probestack.io/onboarding/v1/api/onboarding/resources/${proxyObj.lifecycle.microserviceId}`,
+            `https://forgegateway.probestack.io/onboarding/v1/api/onboarding/resources/${proxyObj.lifecycle.microserviceId}`,
             { headers: { Authorization: `Bearer ${token}` } },
           );
           if (!resourceRes.ok) throw new Error(`Failed to load resource: HTTP ${resourceRes.status}`);
@@ -1975,7 +1975,7 @@ const getDeployedUrlForResource = (resource, assetType) => {
   if (!resource) return "";
   if (assetType === "APIGEE_PROXY") {
     const proxyName = resource.resourceName || resource.apiName || resource.name;
-    return proxyName ? `https://forgesphere.probestack.io/${proxyName}` : "";
+    return proxyName ? `https://forgegateway.probestack.io/${proxyName}` : "";
   }
   if (assetType === "MICROSERVICE") {
     const raw = resource.raw;

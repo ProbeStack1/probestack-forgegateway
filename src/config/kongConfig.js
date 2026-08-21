@@ -2,7 +2,7 @@ export const KONG_STORAGE_KEYS = {
   SETTINGS: 'probeStack_kongSettings',
 };
 
-export const DEFAULT_KONG_BASE_URL = 'https://forgesphere.probestack.io/kong-wrapper';
+export const DEFAULT_KONG_BASE_URL = 'https://forgegateway.probestack.io/kong-wrapper';
 export const DEFAULT_KONG_REGION = 'in';
 
 const normalizeBaseUrl = (url) => {

@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 // Dev-only proxy so the browser can reach the senior's upstream
 // services without running into CORS. In production the frontend is
-// served from the same origin as forgesphere.probestack.io, so these
+// served from the same origin as forgegateway.probestack.io, so these
 // proxies become no-ops (Nginx handles the routes).
 export default defineConfig({
   plugins: [react()],
@@ -16,12 +16,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/apigee-wrapper': {
-        target: 'https://forgesphere.probestack.io',
+        target: 'https://forgegateway.probestack.io',
         changeOrigin: true,
         secure: true,
       },
       '/dev-token': {
-        target: 'https://forgesphere.probestack.io/apigee-wrapper/auth/apigee',
+        target: 'https://forgegateway.probestack.io/apigee-wrapper/auth/apigee',
         changeOrigin: true,
         secure: true,
         rewrite: (p) => p.replace(/^\/dev-token/, ''),

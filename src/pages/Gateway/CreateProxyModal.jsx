@@ -31,7 +31,7 @@ export const CreateProxyModal = ({ open, onClose, selectedOrg, onProxyCreated, s
     setLoadingEnvs(true);
     try {
       const token = await fetchApigeeToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${selectedOrg}/environments`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${selectedOrg}/environments`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (response.ok) {
         const data = await response.json();

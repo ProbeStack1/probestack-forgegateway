@@ -217,10 +217,10 @@ export default function GatewayDashboard() {
         if (!token) return;
         try {
             const [proxiesRes, sharedFlowsRes] = await Promise.all([
-                fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/apis/details`, {
+                fetch(`https://forgegateway.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/apis/details`, {
                     headers: { Authorization: `Bearer ${token}` }
                 }),
-                fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/sharedflows/details`, {
+                fetch(`https://forgegateway.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/sharedflows/details`, {
                     headers: { Authorization: `Bearer ${token}` }
                 })
             ]);
@@ -282,7 +282,7 @@ export default function GatewayDashboard() {
         try {
             const token = await fetchApigeeToken();
             if (!token) return;
-            const res = await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/environments`, {
+            const res = await fetch(`https://forgegateway.probestack.io/apigee-wrapper/organizations/${ORG_NAME}/environments`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (!res.ok) throw new Error(`Failed to fetch environments: ${res.status}`);

@@ -35,7 +35,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
     setDetailsError(null);
     try {
       const token = await fetchApigeeToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}/details`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}/details`;
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
@@ -55,7 +55,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
   const fetchEnvironments = async () => {
     try {
       const token = await fetchApigeeToken();
-      const url = "https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments";
+      const url = "https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments";
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (response.ok) {
         const data = await response.json();
@@ -74,7 +74,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
     setDeploying(true);
     try {
       const token = await fetchApigeeToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments/${deployEnv}/sharedflows/${sharedFlow.name}/revisions/${deployRevision}/deployments?override=true`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments/${deployEnv}/sharedflows/${sharedFlow.name}/revisions/${deployRevision}/deployments?override=true`;
       const trackingHeaders = getTrackingHeaders({ onboardingId: "gen-ai-poc-onboarding" });
       const response = await fetch(url, {
         method: "POST",
@@ -101,7 +101,7 @@ export const SharedFlowDetailView = ({ sharedFlow, onBack, showMessage }) => {
     setDeletingSharedFlow(true);
     try {
       const token = await fetchApigeeToken();
-      const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}`;
+      const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}`;
       const trackingHeaders = getTrackingHeaders({ onboardingId: "gen-ai-poc-onboarding" });
       delete trackingHeaders["Content-Type"];
       const response = await fetch(url, {

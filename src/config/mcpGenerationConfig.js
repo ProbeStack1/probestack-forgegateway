@@ -1,11 +1,11 @@
-const PROD_URL  = 'https://forgesphere.probestack.io/mcp-generate/v1/api';
+const PROD_URL  = 'https://forgegateway.probestack.io/mcp-generate/v1/api';
 const LOCAL_URL = 'http://localhost:8100/mcp-generate/v1/api';
 
 // The bundler evaluates this at module load. Browser only — safe.
 const isLocalHost = typeof window !== 'undefined'
   && /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(window.location.hostname);
 
-const MCP_GEN_BASE_URL = 'https://forgesphere.probestack.io/mcp-generate/v1/api';
+const MCP_GEN_BASE_URL = 'https://forgegateway.probestack.io/mcp-generate/v1/api';
 
 export const MCP_GEN_ENDPOINTS = {
   PROJECTS: {

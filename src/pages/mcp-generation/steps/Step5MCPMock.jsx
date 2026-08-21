@@ -13,7 +13,7 @@ const TRANSPORT_OPTIONS = [
 ];
 
 // ✅ Use Vite's import.meta.env instead of process.env
-const API_BASE_URL = import.meta.env.VITE_MCP_GEN_BASE_URL || 'https://forgesphere.probestack.io/mcp-generate/v1/api';
+const API_BASE_URL = import.meta.env.VITE_MCP_GEN_BASE_URL || 'https://forgegateway.probestack.io/mcp-generate/v1/api';
 
 export default function Step5MCPMock({ state, dispatch, setToast }) {
   const projectId = state?.projectId;

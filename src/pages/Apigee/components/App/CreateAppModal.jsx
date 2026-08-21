@@ -5,7 +5,7 @@ import { apigeeApiFetch } from "../../../../services/apigeeApiService";
 import { getTrackingHeaders } from "../apigeeTracking";
 import useApigeeDevelopers from "../useApigeeDevelopers";
 import useApigeeOrgEnvironmentOptions from "../useApigeeOrgEnvironmentOptions";
-import API_BASE_URL from "../../../../config/apiConfig";
+import { getBusinessUnits, getApplications } from "../../../../http-service/onboardingApi";
 
 
 // Helper: get unique values from array of objects
@@ -44,63 +44,61 @@ export default function CreateAppModal({
   });
 
   // ------------------------------------------------------------
-  // Gateway mode: fetch business units from API
+  // Gateway mode: Business Unit / Application options come from the real
+  // onboarding hierarchy (fg-onboarding-svc), not the legacy
+  // /gatewayonboarding business-units endpoint.
   // ------------------------------------------------------------
-  const [gatewayBusinessUnits, setGatewayBusinessUnits] = useState([]);
+  const [hierarchyBUs, setHierarchyBUs] = useState([]);
   const [isLoadingGatewayBU, setIsLoadingGatewayBU] = useState(false);
   const [gatewayBUError, setGatewayBUError] = useState("");
 
-  const [selectedGatewayBU, setSelectedGatewayBU] = useState("");      // teamName
-  const [selectedGatewayAppName, setSelectedGatewayAppName] = useState(""); // applicationName
+  const [hierarchyApps, setHierarchyApps] = useState([]);
+  const [isLoadingGatewayApps, setIsLoadingGatewayApps] = useState(false);
 
-  const userEmail = localStorage.getItem("userEmail") || "admin@forgecrux.com";
+  const [selectedGatewayBU, setSelectedGatewayBU] = useState("");      // business unit id
+  const [selectedGatewayAppName, setSelectedGatewayAppName] = useState(""); // application name
 
   useEffect(() => {
     if (!isGateway) return;
-    const fetchGatewayBusinessUnits = async () => {
-      setIsLoadingGatewayBU(true);
-      setGatewayBUError("");
-      try {
-        const url = `${API_BASE_URL}/gatewayonboarding/api/v1/user/${encodeURIComponent(userEmail)}/business-units`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        if (result.status === "SUCCESS" && Array.isArray(result.data?.businessUnits)) {
-          setGatewayBusinessUnits(result.data.businessUnits);
-        } else {
-          throw new Error("Invalid API response structure");
-        }
-      } catch (err) {
-        console.error("Gateway BU fetch failed:", err);
-        setGatewayBUError(err.message || "Failed to load business units");
-      } finally {
-        setIsLoadingGatewayBU(false);
-      }
-    };
-    fetchGatewayBusinessUnits();
-  }, [isGateway, userEmail]);
+    let cancelled = false;
+    setIsLoadingGatewayBU(true);
+    setGatewayBUError("");
+    getBusinessUnits(0, 200)
+      .then((list) => { if (!cancelled) setHierarchyBUs(list || []); })
+      .catch((err) => {
+        console.error("Business unit fetch failed:", err);
+        if (!cancelled) setGatewayBUError(err.message || "Failed to load business units");
+      })
+      .finally(() => { if (!cancelled) setIsLoadingGatewayBU(false); });
+    return () => { cancelled = true; };
+  }, [isGateway]);
 
-  // Gateway cascade options
-  const gatewayBUOptions = useMemo(
-    () => uniqueValues(gatewayBusinessUnits, "teamName"),
-    [gatewayBusinessUnits]
+  useEffect(() => {
+    if (!isGateway || !selectedGatewayBU) { setHierarchyApps([]); return; }
+    let cancelled = false;
+    setIsLoadingGatewayApps(true);
+    getApplications({ businessUnitId: selectedGatewayBU, size: 200 })
+      .then((list) => { if (!cancelled) setHierarchyApps(list || []); })
+      .catch((err) => {
+        console.error("Application fetch failed:", err);
+        if (!cancelled) setHierarchyApps([]);
+      })
+      .finally(() => { if (!cancelled) setIsLoadingGatewayApps(false); });
+    return () => { cancelled = true; };
+  }, [isGateway, selectedGatewayBU]);
+
+  // Gateway cascade options — {id, name, displayName} business units
+  const gatewayBUOptions = hierarchyBUs;
+
+  const gatewayAppNameOptions = useMemo(
+    () => uniqueValues(hierarchyApps, "name"),
+    [hierarchyApps]
   );
 
-  const gatewayAppNameOptions = useMemo(() => {
-    if (!selectedGatewayBU) return [];
-    return uniqueValues(
-      gatewayBusinessUnits.filter((bu) => bu.teamName === selectedGatewayBU),
-      "applicationName"
-    );
-  }, [selectedGatewayBU, gatewayBusinessUnits]);
-
   const gatewayAppIdOptions = useMemo(() => {
-    if (!selectedGatewayBU || !selectedGatewayAppName) return [];
-    return gatewayBusinessUnits.filter(
-      (bu) =>
-        bu.teamName === selectedGatewayBU && bu.applicationName === selectedGatewayAppName
-    );
-  }, [selectedGatewayBU, selectedGatewayAppName, gatewayBusinessUnits]);
+    if (!selectedGatewayAppName) return [];
+    return hierarchyApps.filter((app) => app.name === selectedGatewayAppName);
+  }, [selectedGatewayAppName, hierarchyApps]);
 
   const handleGatewayAppSelect = (onboardingId, microserviceId = "") => {
     setForm((prev) => ({ ...prev, onboardingId, microserviceId }));
@@ -209,6 +207,16 @@ export default function CreateAppModal({
     try {
       const res = await apigeeApiFetch(APIGEE_ENDPOINTS.APPS.GET(org, developer_email, name));
       const data = await res.json();
+
+      // Business Unit, Application, Display Name, Description, Company Name/Email
+      // and onboarding/microservice ids all live in Apigee's own `attributes` on
+      // the app (see buildAppAttributes below) — Apigee has no native fields for
+      // most of these, so this is the only place they're persisted.
+      const attrMap = {};
+      (data?.attributes || []).forEach((attr) => {
+        if (attr?.name) attrMap[attr.name] = attr.value ?? "";
+      });
+
       setForm((prev) => ({
         ...prev,
         organization: org,
@@ -218,7 +226,21 @@ export default function CreateAppModal({
           .map((product) => product?.apiproduct || product?.name || product)
           .filter(Boolean),
         developer_email: data?.developer_email || prev.developer_email,
+        displayName: attrMap.displayName ?? prev.displayName,
+        description: attrMap.description ?? prev.description,
+        companyName: attrMap.companyName ?? prev.companyName,
+        companyEmail: attrMap.companyEmail ?? prev.companyEmail,
+        onboardingId: attrMap.onboardingId || prev.onboardingId,
+        microserviceId: attrMap.microserviceId || prev.microserviceId,
       }));
+
+      // Gateway mode has no live cascade to derive Business Unit/Application
+      // from onboardingId alone (unlike non-gateway mode's selectedOption
+      // lookup below), so restore the cascade selections directly.
+      if (isGateway) {
+        if (attrMap.businessUnitId) setSelectedGatewayBU(attrMap.businessUnitId);
+        if (attrMap.applicationName) setSelectedGatewayAppName(attrMap.applicationName);
+      }
     } catch (e) {
       console.error("Failed to fetch app details", e);
     }
@@ -287,6 +309,31 @@ export default function CreateAppModal({
     onClose();
   };
 
+  // Apigee apps have no native fields for these — they're persisted as
+  // custom attributes so fetchAppDetails can read them straight back on Edit.
+  const buildAppAttributes = () => {
+    const attrs = [];
+    const add = (name, value) => {
+      if (value !== undefined && value !== null && value !== "") {
+        attrs.push({ name, value: String(value) });
+      }
+    };
+    add("displayName", form.displayName);
+    add("description", form.description);
+    add("companyName", form.companyName);
+    add("companyEmail", form.companyEmail);
+    add("onboardingId", form.onboardingId);
+    add("microserviceId", form.microserviceId);
+    if (isGateway) {
+      add("businessUnitId", selectedGatewayBU);
+      add("applicationName", selectedGatewayAppName);
+    } else {
+      add("businessUnit", businessUnit);
+      add("applicationName", teamName);
+    }
+    return attrs;
+  };
+
   const createApp = async (org, developer_email) => {
     if (!org || !developer_email) return;
     try {
@@ -297,7 +344,7 @@ export default function CreateAppModal({
           name: form.name,
           apiProducts: form.products,
           keyExpiresIn: -1,
-          attributes: [],
+          attributes: buildAppAttributes(),
         }),
       });
       await res.json();
@@ -316,7 +363,7 @@ export default function CreateAppModal({
           name: form.name,
           apiProducts: form.products,
           keyExpiresIn: -1,
-          attributes: [],
+          attributes: buildAppAttributes(),
         }),
       });
       await res.json();
@@ -394,8 +441,8 @@ export default function CreateAppModal({
                       {isLoadingGatewayBU ? "Loading business units..." : "Select Business Unit"}
                     </option>
                     {gatewayBUOptions.map((unit) => (
-                      <option key={unit} value={unit}>
-                        {unit}
+                      <option key={unit.id} value={unit.id}>
+                        {unit.displayName || unit.name}
                       </option>
                     ))}
                   </select>
@@ -430,7 +477,7 @@ export default function CreateAppModal({
               ) : (
                 <select
                   value={selectedGatewayAppName}
-                  disabled={isLoadingGatewayBU || !selectedGatewayBU}
+                  disabled={isLoadingGatewayApps || !selectedGatewayBU}
                   className="w-full px-4 py-3 rounded-lg bg-[#0f172a] border border-gray-700 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   onChange={(e) => handleGatewayAppNameChange(e.target.value)}
                 >
@@ -465,15 +512,15 @@ export default function CreateAppModal({
               ) : (
                 <select
                   value={form.onboardingId}
-                  disabled={isLoadingGatewayBU || !selectedGatewayBU || !selectedGatewayAppName}
+                  disabled={isLoadingGatewayApps || !selectedGatewayBU || !selectedGatewayAppName}
                   className="w-full px-4 py-3 rounded-lg bg-[#0f172a] border border-gray-700 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   onChange={(e) => {
                     const selectedId = e.target.value;
                     const matched = gatewayAppIdOptions.find(
-                      (opt) => opt.onboardingId === selectedId
+                      (opt) => (opt.applicationId || opt.id) === selectedId
                     );
                     if (matched) {
-                      handleGatewayAppSelect(matched.onboardingId, matched.microserviceId || "");
+                      handleGatewayAppSelect(matched.applicationId || matched.id, matched.id || "");
                     } else {
                       handleGatewayAppSelect(selectedId, "");
                     }
@@ -483,9 +530,9 @@ export default function CreateAppModal({
                     {selectedGatewayAppName ? "Select Application ID" : "Select an application name first"}
                   </option>
                   {gatewayAppIdOptions.map((opt) => (
-                    <option key={opt.onboardingId} value={opt.onboardingId}>
-                      {opt.applicationId}
-                      {opt.applicationName ? ` - ${opt.applicationName}` : ""}
+                    <option key={opt.applicationId || opt.id} value={opt.applicationId || opt.id}>
+                      {opt.applicationId || opt.id}
+                      {opt.name ? ` - ${opt.name}` : ""}
                     </option>
                   ))}
                 </select>

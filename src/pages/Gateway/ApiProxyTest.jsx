@@ -27,7 +27,7 @@ export const ApiProxyTest = ({ showMessage }) => {
     // Fetch token (reuse existing logic)
     const fetchToken = async () => {
         try {
-            const res = await fetch('https://forgesphere.probestack.io/apigee-wrapper/auth/apigee/token');
+            const res = await fetch('https://forgegateway.probestack.io/apigee-wrapper/auth/apigee/token');
             if (!res.ok) throw new Error(`Token service error: ${res.status}`);
             const data = await res.json();
             return data.access_token;
@@ -44,7 +44,7 @@ export const ApiProxyTest = ({ showMessage }) => {
         try {
             const token = await fetchToken();
             if (!token) return;
-            const url = 'https://forgesphere.probestack.io/apigee-wrapper/organizations';
+            const url = 'https://forgegateway.probestack.io/apigee-wrapper/organizations';
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -68,7 +68,7 @@ export const ApiProxyTest = ({ showMessage }) => {
         try {
             const token = await fetchToken();
             if (!token) return;
-            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/environments`;
+            const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/environments`;
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -90,7 +90,7 @@ export const ApiProxyTest = ({ showMessage }) => {
         try {
             const token = await fetchToken();
             if (!token) return;
-            const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/apis/details`;
+            const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/apis/details`;
             const response = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -129,7 +129,7 @@ export const ApiProxyTest = ({ showMessage }) => {
             }
 
             // Fetch proxy details to get basePath
-            const detailsUrl = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/apis/${proxyName}/details`;
+            const detailsUrl = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/apis/${proxyName}/details`;
             const detailsRes = await fetch(detailsUrl, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });

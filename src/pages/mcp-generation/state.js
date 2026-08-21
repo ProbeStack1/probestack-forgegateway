@@ -292,7 +292,7 @@ export function reducer(state, action) {
 
     case 'APPLY_PRESET': {
       const presets = {
-        production: { rateLimit: { enabled: true, requestsPerMinute: 60 }, cors: { enabled: true, allowedOrigins: 'https://forgeq.probestack.io,https://forgesphere.probestack.io' }, logging: { enabled: true }, healthCheck: { enabled: true, path: '/healthz' }, metrics: { enabled: true, path: '/metrics' } },
+        production: { rateLimit: { enabled: true, requestsPerMinute: 60 }, cors: { enabled: true, allowedOrigins: 'https://forgeq.probestack.io,https://forgegateway.probestack.io' }, logging: { enabled: true }, healthCheck: { enabled: true, path: '/healthz' }, metrics: { enabled: true, path: '/metrics' } },
         development:{ rateLimit: { enabled: false, requestsPerMinute: 60 }, cors: { enabled: true, allowedOrigins: '*' }, logging: { enabled: true }, healthCheck: { enabled: true, path: '/healthz' }, metrics: { enabled: false, path: '/metrics' } },
       };
       const p = presets[action.preset];

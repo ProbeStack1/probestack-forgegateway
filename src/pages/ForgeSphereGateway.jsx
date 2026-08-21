@@ -293,7 +293,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //         try {
 //             const token = await fetchToken();
 //             if (!token) return;
-//             const url = 'https://forgesphere.probestack.io/apigee-wrapper/organizations';
+//             const url = 'https://forgegateway.probestack.io/apigee-wrapper/organizations';
 //             const response = await fetch(url, {
 //                 headers: { 'Authorization': `Bearer ${token}` }
 //             });
@@ -334,7 +334,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //         try {
 //             const token = await fetchToken();
 //             if (!token) return;
-//             const url = (`https://forgesphere.probestack.io/apigee-wrapper/organizations/${orgName}/environments`);
+//             const url = (`https://forgegateway.probestack.io/apigee-wrapper/organizations/${orgName}/environments`);
 //             const response = await fetch(url, {
 //                 headers: { 'Authorization': `Bearer ${token}` }
 //             });
@@ -448,7 +448,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //                 const token = await fetchToken();
 //                 if (!token) throw new Error('Failed to obtain access token');
 
-//                 const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/details`;
+//                 const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/${proxy.name}/details`;
 //                 const response = await fetch(url, {
 //                     headers: { 'Authorization': `Bearer ${token}` }
 //                 });
@@ -1523,7 +1523,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 // //         try {
 // //             const token = await fetchToken();
 // //             if (!token) return;
-// //             const res = await fetch('https://forgesphere.probestack.io/apigee-wrapper/organizations', {
+// //             const res = await fetch('https://forgegateway.probestack.io/apigee-wrapper/organizations', {
 // //                 headers: { Authorization: `Bearer ${token}` }
 // //             });
 // //             const data = await res.json();
@@ -1546,7 +1546,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 // //         try {
 // //             const token = await fetchToken();
 // //             if (!token) return;
-// //             const res = await fetch(`https://forgesphere.probestack.io/apigee-wrapper/organizations/${org}/environments`, {
+// //             const res = await fetch(`https://forgegateway.probestack.io/apigee-wrapper/organizations/${org}/environments`, {
 // //                 headers: { Authorization: `Bearer ${token}` }
 // //             });
 // //             const data = await res.json();
@@ -1767,7 +1767,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //         setLoadingCreateEnvs(true);
 //         try {
 //             const token = await fetchToken();
-//             const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/${selectedOrg}/environments`;
+//             const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/${selectedOrg}/environments`;
 //             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 //             if (response.ok) {
 //                 const data = await response.json();
@@ -1868,7 +1868,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //         setLoadingProxies(true);
 //         try {
 //             const token = await fetchToken();
-//             const response = await fetch('https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
+//             const response = await fetch('https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
 //                 headers: { Authorization: `Bearer ${token}` }
 //             });
 //             const data = await response.json();
@@ -2172,7 +2172,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //                 if (!token) {
 //                     throw new Error('Failed to obtain access token');
 //                 }
-//                 const response = await fetch('https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
+//                 const response = await fetch('https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apis/details', {
 //                     headers: {
 //                         'Authorization': `Bearer ${token}`
 //                     }
@@ -2198,7 +2198,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //             try {
 //                 const token = await fetchToken();
 //                 if (!token) throw new Error('Failed to obtain access token');
-//                 const response = await fetch('https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/details', {
+//                 const response = await fetch('https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/details', {
 //                     headers: { 'Authorization': `Bearer ${token}` }
 //                 });
 //                 if (!response.ok) throw new Error(`Failed to fetch shared flows: ${response.statusText}`);
@@ -5679,7 +5679,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //             setDetailsError(null);
 //             try {
 //                 const token = await fetchToken();
-//                 const url = `https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}/details`;
+//                 const url = `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/sharedflows/${sharedFlow.name}/details`;
 //                 const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 //                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 //                 const data = await response.json();
@@ -5697,7 +5697,7 @@ export default function ForgeSphereGateway({ showHeader = false }) {
 //     const fetchEnvironments = async () => {
 //         try {
 //             const token = await fetchToken();
-//             const url = 'https://forgesphere.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments';
+//             const url = 'https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/environments';
 //             const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 //             if (response.ok) {
 //                 const data = await response.json();

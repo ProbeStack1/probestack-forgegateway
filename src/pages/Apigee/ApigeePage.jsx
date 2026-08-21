@@ -1590,6 +1590,8 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
             setIsTargetServerModal(false);
             fetchTargetServers();
           }}
+          onSuccess={(name) => setToast({ message: `Backend service "${name}" saved successfully`, type: "success" })}
+          onError={(message) => setToast({ message, type: "error" })}
           editData={tsEditData}
           organization={projectId}
           environment={env}
@@ -1597,6 +1599,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
           isFetchingOnboardings={isFetchingOnboardings}
           defaultOnboardingId={selectedOnboardingId}
           defaultMicroserviceId={selectedMicroserviceId}
+          isGateway={!showHeader}
         />
       )}
       {isKVMModal && (
@@ -1623,6 +1626,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
           isFetchingOnboardings={isFetchingOnboardings}
           defaultOnboardingId={selectedOnboardingId}
           defaultMicroserviceId={selectedMicroserviceId}
+          isGateway={!showHeader}
         />
       )}
       {isProductModal && (

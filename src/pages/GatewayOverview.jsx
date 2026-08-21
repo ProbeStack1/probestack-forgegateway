@@ -154,7 +154,7 @@ export const ProxyDetailViewWrapper = ({ showMessage, backPath = '/gateway/proxy
         const token = await fetchApigeeToken();
         const effectiveOrg = "gen-ai-poc-onboarding"; // or from context if needed
         const response = await fetch(
-          `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`,
+          `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/apis/${proxyName}/details`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (!response.ok) throw new Error("Proxy not found");

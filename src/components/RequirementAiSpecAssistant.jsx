@@ -106,7 +106,7 @@ const DEFAULT_CONNECTOR = {
 
 const CONNECTORS_STORAGE_KEY = 'probeStack_specForgeAgentConnectors';
 const SELECTED_CONNECTORS_STORAGE_KEY = 'probeStack_specForgeAgentSelectedConnectors';
-const APP_API_BASE_URL = 'https://forgesphere.probestack.io';
+const APP_API_BASE_URL = 'https://forgegateway.probestack.io';
 const DEFAULT_ORGANIZATION_ID = 'f52c02e6-d67a-4bc9-8e94-36e9d4b8d30c';
 
 const getBrowserValue = (key, fallback = '') => {

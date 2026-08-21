@@ -57,7 +57,7 @@ export const SharedFlowsView = ({ showMessage }) => {
         try {
             const token = await fetchApigeeToken();
             const response = await fetch(
-                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/details`,
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/details`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             if (!response.ok) throw new Error(`Failed to fetch shared flows: ${response.statusText}`);
@@ -93,7 +93,7 @@ export const SharedFlowsView = ({ showMessage }) => {
         try {
             const token = await fetchApigeeToken();
             const detailsRes = await fetch(
-                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/${sfName}/details`,
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/${sfName}/details`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
             if (!detailsRes.ok) throw new Error("Failed to fetch shared flow details");
@@ -162,7 +162,7 @@ export const SharedFlowsView = ({ showMessage }) => {
             const trackingHeaders = getTrackingHeaders({ onboardingId: selectedOrg });
             delete trackingHeaders["Content-Type"];
             const response = await fetch(
-                `https://forgesphere.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/sharedflows?action=import&name=${encodeURIComponent(name)}`,
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${encodeURIComponent(effectiveOrg)}/sharedflows?action=import&name=${encodeURIComponent(name)}`,
                 {
                     method: "POST",
                     headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },

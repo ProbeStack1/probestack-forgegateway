@@ -5,6 +5,7 @@ import { apigeeApiFetch } from "../../../../services/apigeeApiService";
 import { getTrackingHeaders } from "../apigeeTracking";
 import OnboardingCascadeSelect from "../OnboardingCascadeSelect";
 import useApigeeOrgEnvironmentOptions from "../useApigeeOrgEnvironmentOptions";
+import { getBusinessUnits, getApplications, getApplicationDetail } from "../../../../http-service/onboardingApi";
 
 export default function CreateTargetServerModal({
     onClose,
@@ -20,7 +21,7 @@ export default function CreateTargetServerModal({
     // Gateway specific props
     isGateway = false,
     businessUnit = "",
-    application = null,   // { name, id, onboardingId }
+    application = null,   // { name, id, onboardingId } — initial hint only; the modal owns its own selection below
 }) {
     const [form, setForm] = useState({
         organization: organization,
@@ -46,6 +47,95 @@ export default function CreateTargetServerModal({
         isFetchingEnvironments,
     } = useApigeeOrgEnvironmentOptions(form.organization);
 
+    // ------------------------------------------------------------
+    // Gateway mode: Business Unit / Application, sourced from the real
+    // onboarding hierarchy (fg-onboarding-svc), not any legacy endpoint.
+    // ------------------------------------------------------------
+    const [hierarchyBUs, setHierarchyBUs] = useState([]);
+    const [isLoadingGatewayBU, setIsLoadingGatewayBU] = useState(false);
+    const [gatewayBUError, setGatewayBUError] = useState("");
+
+    const [hierarchyApps, setHierarchyApps] = useState([]);
+    const [isLoadingGatewayApps, setIsLoadingGatewayApps] = useState(false);
+
+    const [selectedGatewayBU, setSelectedGatewayBU] = useState("");     // business unit id
+    const [selectedGatewayAppId, setSelectedGatewayAppId] = useState(""); // application's Mongo id
+
+    useEffect(() => {
+        if (!isGateway) return;
+        let cancelled = false;
+        setIsLoadingGatewayBU(true);
+        setGatewayBUError("");
+        getBusinessUnits(0, 200)
+            .then((list) => { if (!cancelled) setHierarchyBUs(list || []); })
+            .catch((err) => {
+                console.error("Business unit fetch failed:", err);
+                if (!cancelled) setGatewayBUError(err.message || "Failed to load business units");
+            })
+            .finally(() => { if (!cancelled) setIsLoadingGatewayBU(false); });
+        return () => { cancelled = true; };
+    }, [isGateway]);
+
+    useEffect(() => {
+        if (!isGateway || !selectedGatewayBU) { setHierarchyApps([]); return; }
+        let cancelled = false;
+        setIsLoadingGatewayApps(true);
+        getApplications({ businessUnitId: selectedGatewayBU, size: 200 })
+            .then((list) => { if (!cancelled) setHierarchyApps(list || []); })
+            .catch((err) => {
+                console.error("Application fetch failed:", err);
+                if (!cancelled) setHierarchyApps([]);
+            })
+            .finally(() => { if (!cancelled) setIsLoadingGatewayApps(false); });
+        return () => { cancelled = true; };
+    }, [isGateway, selectedGatewayBU]);
+
+    const gatewayBUOptions = hierarchyBUs;
+    const gatewayApplicationOptions = hierarchyApps;
+
+    const handleGatewayBUChange = (nextBU) => {
+        setSelectedGatewayBU(nextBU);
+        setSelectedGatewayAppId("");
+        setForm((prev) => ({ ...prev, onboardingId: "", microserviceId: "" }));
+    };
+
+    const handleGatewayAppChange = (nextAppMongoId) => {
+        setSelectedGatewayAppId(nextAppMongoId);
+        const app = hierarchyApps.find((a) => a.id === nextAppMongoId) || null;
+        setForm((prev) => ({
+            ...prev,
+            onboardingId: app?.applicationId || app?.id || "",
+            microserviceId: app?.id || "",
+        }));
+    };
+
+    // Given an Application's Mongo id, resolve its Business Unit + selection —
+    // used both to pre-fill from the `application` prop on create, and to
+    // restore the BU/Application cascade from tracked audit data on edit.
+    const hydrateGatewaySelectionFromApplicationId = async (appMongoId) => {
+        if (!appMongoId) return;
+        try {
+            const app = await getApplicationDetail(appMongoId);
+            if (app?.businessUnitId) setSelectedGatewayBU(app.businessUnitId);
+            setSelectedGatewayAppId(appMongoId);
+            setForm((prev) => ({
+                ...prev,
+                onboardingId: prev.onboardingId || app?.applicationId || appMongoId,
+                microserviceId: appMongoId,
+            }));
+        } catch (err) {
+            console.error("Failed to load application detail", err);
+        }
+    };
+
+    useEffect(() => {
+        if (isGateway && !editData?.name && application?.id) {
+            hydrateGatewaySelectionFromApplicationId(application.id);
+        }
+        // Only ever run this prefill once, on mount, for the create flow.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Fetch existing target server details for edit
     const fetchTargetServerDetails = async (org, env, name) => {
         if (!org || !env || !name) return;
@@ -54,6 +144,7 @@ export default function CreateTargetServerModal({
                 APIGEE_ENDPOINTS.TARGET_SERVERS.GET(org, env, name)
             );
             const data = await res.json();
+            const registry = data?.audit?.registry || {};
             setForm(prev => ({
                 ...prev,
                 organization: org,
@@ -61,7 +152,12 @@ export default function CreateTargetServerModal({
                 name: data?.name || "",
                 host: data?.host || "",
                 port: data?.port || "",
+                onboardingId: registry.onboardingId || prev.onboardingId,
+                microserviceId: registry.microserviceId || prev.microserviceId,
             }));
+            if (isGateway && registry.microserviceId) {
+                await hydrateGatewaySelectionFromApplicationId(registry.microserviceId);
+            }
         } catch (e) {
             console.error("Failed to fetch target server details", e);
         }
@@ -92,11 +188,26 @@ export default function CreateTargetServerModal({
         }));
     };
 
+    // Gateway mode tracks the selected Business Unit / Application in the
+    // config-tracking registry (via x-project-id / x-application-id headers,
+    // see fg-apigee-wrapper-svc's tracking-metadata.service.ts) so Edit can
+    // restore the full selection later — not just onboardingId/microserviceId.
+    const buildTrackingContext = () => {
+        if (!isGateway) return form;
+        const app = hierarchyApps.find((a) => a.id === selectedGatewayAppId) || null;
+        return {
+            ...form,
+            applicationId: app?.applicationId,
+            applicationName: app?.name,
+            projectId: app?.projectId,
+        };
+    };
+
     const createTargetServer = async (org, env) => {
         if (!org || !env) return;
         const res = await apigeeApiFetch(APIGEE_ENDPOINTS.TARGET_SERVERS.CREATE(org, env), {
             method: 'POST',
-            headers: getTrackingHeaders(form),
+            headers: getTrackingHeaders(buildTrackingContext()),
             body: JSON.stringify({
                 name: form.name,
                 host: form.host,
@@ -115,7 +226,7 @@ export default function CreateTargetServerModal({
         if (!org || !env || !name) return;
         const res = await apigeeApiFetch(APIGEE_ENDPOINTS.TARGET_SERVERS.UPDATE(org, env, name), {
             method: 'PUT',
-            headers: getTrackingHeaders(form),
+            headers: getTrackingHeaders(buildTrackingContext()),
             body: JSON.stringify({
                 name: form.name,
                 host: form.host,
@@ -132,8 +243,8 @@ export default function CreateTargetServerModal({
 
     const handleSubmit = async () => {
         // Gateway mode validation
-        if (isGateway && !application) {
-            const errMsg = "No application found for the selected business unit.";
+        if (isGateway && !selectedGatewayAppId) {
+            const errMsg = "Please select a Business Unit and Application.";
             if (onError) onError(errMsg);
             return;
         }
@@ -229,7 +340,55 @@ export default function CreateTargetServerModal({
                                 </div>
                             </div>
                         </>
-                    ) : null}
+                    ) : (
+                        // =============== GATEWAY MODE ===============
+                        <div className="grid grid-cols-2 gap-6">
+                            <div>
+                                <label className="text-sm text-gray-400">Business Unit*</label>
+                                <select
+                                    value={selectedGatewayBU}
+                                    disabled={isLoadingGatewayBU}
+                                    className={inputStyle}
+                                    onChange={(e) => handleGatewayBUChange(e.target.value)}
+                                >
+                                    <option value="">
+                                        {isLoadingGatewayBU ? "Loading business units..." : "Select Business Unit"}
+                                    </option>
+                                    {gatewayBUOptions.map((unit) => (
+                                        <option key={unit.id} value={unit.id}>
+                                            {unit.displayName || unit.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {gatewayBUError && (
+                                    <p className="text-xs text-red-400 mt-1">{gatewayBUError}</p>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-sm text-gray-400">Application*</label>
+                                <select
+                                    value={selectedGatewayAppId}
+                                    disabled={isLoadingGatewayApps || !selectedGatewayBU}
+                                    className={inputStyle}
+                                    onChange={(e) => handleGatewayAppChange(e.target.value)}
+                                >
+                                    <option value="">
+                                        {!selectedGatewayBU
+                                            ? "Select a business unit first"
+                                            : isLoadingGatewayApps
+                                            ? "Loading applications..."
+                                            : "Select Application"}
+                                    </option>
+                                    {gatewayApplicationOptions.map((app) => (
+                                        <option key={app.id} value={app.id}>
+                                            {app.name}
+                                            {app.applicationId ? ` (${app.applicationId})` : ""}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Common fields for both modes */}
                     <div className="grid grid-cols-2 gap-6">

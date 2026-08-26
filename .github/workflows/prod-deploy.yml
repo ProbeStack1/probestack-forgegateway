@@ -61,6 +61,8 @@ jobs:
           context: .
           push: true
           provenance: false
+          secrets: |
+            google_artifact_token=${{ steps.auth.outputs.access_token }}
           tags: |
             ${{ env.ARTIFACT_REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
           cache-from: type=gha

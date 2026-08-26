@@ -39,6 +39,7 @@ import axios from '../lib/axios'
 import styles from './ProxyEditor.module.css'
 import './ProxyEditorExpand.css'
 import { ResourceAIAssistance } from '../components/ResourceAIAssistance'
+import { POLICY_LIBRARY, POLICY_TYPE_TO_ELEMENT, MINIMAL_POLICY_XML, policyResourceFile } from '../config/policyLibrary'
 
 const apiproxyRoot = 'apiproxy/'
 
@@ -94,12 +95,6 @@ const POLICY_DOCS = {
   Quota: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies/quota-policy', label: 'Quota' },
   Generic: { url: 'https://cloud.google.com/apigee/docs/api-platform/reference/policies', label: 'Policy Reference' },
 }
-
-const MINIMAL_POLICY_XML = (type, name) => `<?xml version="1.0" encoding="UTF-8"?>
-<${type || 'Policy'} name="${name}">
-  <DisplayName>${name}</DisplayName>
-</${type || 'Policy'}>
-`
 
 /* ----------------------- Helpers ----------------------- */
 function getPolicyPrefix(type) {
@@ -562,56 +557,6 @@ export const ProxyEditor = ({ selectedProxyName, initialZipUrl, onBack }) => {
   const [policySearch, setPolicySearch] = useState('');
   const [selectedPolicyLib, setSelectedPolicyLib] = useState(null);
 
-  // Policy library data (exactly as in the HTML)
-  const POLICY_LIBRARY = [
-    {
-      cat: 'AI / LLM',
-      cls: 'ai-item',
-      items: [
-        { name: 'LLM-RoutingPolicy', icon: '🌐', typeKey: 'llm-route' },
-        { name: 'LLM-GuardRails', icon: '🛡️', typeKey: 'llm-guard' },
-        { name: 'LLM-TokenQuota', icon: '📊', typeKey: 'llm-quota' },
-        { name: 'LLM-SemanticCache', icon: '💾', typeKey: 'llm-cache' },
-        { name: 'AI-PromptInjectionGuard', icon: '🚫', typeKey: 'prompt-inject' },
-        { name: 'AI-PIIRedaction', icon: '🔏', typeKey: 'ai-pii' },
-        { name: 'AI-CostTracker', icon: '💰', typeKey: 'ai-cost' },
-        { name: 'LLM-FallbackRouter', icon: '🔄', typeKey: 'llm-fallback' },
-      ],
-    },
-    {
-      cat: 'MCP Gateway',
-      cls: 'mcp-item',
-      items: [
-        { name: 'MCP-AuthValidator', icon: '🔒', typeKey: 'mcp-auth' },
-        { name: 'MCP-ToolRouter', icon: '🌐', typeKey: 'mcp-route' },
-        { name: 'MCP-RateLimit', icon: '⏱️', typeKey: 'mcp-ratelimit' },
-        { name: 'MCP-AuditLogger', icon: '📄', typeKey: 'mcp-log' },
-      ],
-    },
-    {
-      cat: 'Security',
-      cls: '',
-      items: [
-        { name: 'VerifyAPIKey', icon: '🔑', typeKey: 'verify-key' },
-        { name: 'OAuthV2', icon: '🔐', typeKey: 'oauth' },
-        { name: 'JWT Verify', icon: '🎫', typeKey: 'jwt' },
-        { name: 'SpikeArrest', icon: '⚡', typeKey: 'spike' },
-        { name: 'Quota', icon: '📏', typeKey: 'quota' },
-      ],
-    },
-    {
-      cat: 'Mediation',
-      cls: '',
-      items: [
-        { name: 'AssignMessage', icon: '↔️', typeKey: 'assign-message' },
-        { name: 'ExtractVariables', icon: '🔍', typeKey: 'extract-vars' },
-        { name: 'JSONToXML', icon: '{ }', typeKey: 'json-to-xml' },
-        { name: 'JavaScript', icon: 'JS', typeKey: 'javascript' },
-        { name: 'ResponseCache', icon: '💾', typeKey: 'response-cache' },
-      ],
-    },
-  ];
-
   // Filter function
   const filterPolicyLib = (q) => {
     setPolicySearch(q);
@@ -662,35 +607,7 @@ export const ProxyEditor = ({ selectedProxyName, initialZipUrl, onBack }) => {
 
     const typeKey = selectedItem.typeKey;
     let baseName = selectedItem.name;
-    // For some policies, the XML root element name is different from the display name.
-    // We use the typeKey as the root element for the minimal XML.
-    const policyXmlType = typeKey; // e.g., 'verify-key' but we need actual policy type like 'VerifyAPIKey'
-    // Map typeKey to actual policy element name (used in MINIMAL_POLICY_XML)
-    const typeToElement = {
-      'verify-key': 'VerifyAPIKey',
-      'oauth': 'OAuthV2',
-      'jwt': 'VerifyJWT',
-      'spike': 'SpikeArrest',
-      'quota': 'Quota',
-      'llm-route': 'JavaScript',
-      'llm-guard': 'JavaScript',
-      'llm-quota': 'JavaScript',
-      'llm-cache': 'JavaScript',
-      'prompt-inject': 'JavaScript',
-      'ai-pii': 'JavaScript',
-      'ai-cost': 'StatisticsCollector',
-      'llm-fallback': 'JavaScript',
-      'mcp-auth': 'JavaScript',
-      'mcp-route': 'JavaScript',
-      'mcp-ratelimit': 'JavaScript',
-      'mcp-log': 'MessageLogging',
-      'assign-message': 'AssignMessage',
-      'extract-vars': 'ExtractVariables',
-      'json-to-xml': 'JSONToXML',
-      'javascript': 'JavaScript',
-      'response-cache': 'ResponseCache',
-    };
-    const actualPolicyType = typeToElement[typeKey] || typeKey;
+    const actualPolicyType = POLICY_TYPE_TO_ELEMENT[typeKey] || typeKey;
 
     // Generate a unique name (e.g., "VerifyAPIKey" or "VerifyAPIKey-1")
     const uniqueName = generateUniquePolicyName(baseName);
@@ -708,6 +625,17 @@ export const ProxyEditor = ({ selectedProxyName, initialZipUrl, onBack }) => {
       m.set(policyPath, policyXml);
       return m;
     });
+
+    // Javascript policies are schema-invalid without a resource for their
+    // <ResourceURL> to resolve to — write the matching stub alongside it.
+    const resourceFile = policyResourceFile(actualPolicyType, uniqueName);
+    if (resourceFile) {
+      setFiles(prev => {
+        const m = new Map(prev);
+        m.set(`${apiproxyRoot}${resourceFile.path}`, resourceFile.content);
+        return m;
+      });
+    }
 
     // Now attach to the current context (if any)
     if (policyAttach?.section === 'sharedflow') {
@@ -804,7 +732,7 @@ export const ProxyEditor = ({ selectedProxyName, initialZipUrl, onBack }) => {
               e.currentTarget.style.background = '#1e2636';
             }}
           >
-            <div style={{ fontSize: 18, marginBottom: 5 }}>{item.icon}</div>
+            <item.icon size={18} style={{ marginBottom: 5 }} color="#e2e8f0" />
             <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>{item.name}</div>
             <div style={{ fontSize: 10, color: '#7f8fa8', marginTop: 2 }}>{cat.cat}</div>
           </div>

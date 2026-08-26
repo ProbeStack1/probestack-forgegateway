@@ -25,16 +25,21 @@ const PROJECT_TYPES = [
 
 // Maps a raw onboarding-api application object into the shape the rest of
 // this page expects (ctx.onboarding?.xxx / ctx.id / ctx.resources).
+// The /api/v1/onboarding/applications payload (see ApplicationDetail.jsx,
+// which reads the same objects directly) names these fields `ownerName`,
+// `businessUnitName` and `projectName` — this app's onboarding model has no
+// separate "team" concept, so `projectName` is what actually identifies the
+// owning group beneath the business unit.
 const toContextLikeApplication = (app = {}) => ({
   id: app.id,
   onboarding: {
     id: app.id,
     applicationId: app.applicationId || app.id,
     applicationName: app.name || app.applicationName || 'Unnamed',
-    projectOwner: app.projectOwner || app.owner || '',
+    projectOwner: app.ownerName || app.projectOwner || app.owner || '',
     ownerEmail: app.ownerEmail || '',
-    businessUnit: app.businessUnit || app.businessUnitName || '',
-    teamName: app.teamName || app.team || '',
+    businessUnit: app.businessUnitName || app.businessUnit || '',
+    projectName: app.projectName || '',
     createdAt: app.createdAt || app.created_at || '',
     ...app,
   },
@@ -1134,6 +1139,7 @@ const [confirmTagDelete, setConfirmTagDelete] = useState(null); // tag key to co
   const [allStrategies, setAllStrategies] = useState([]);
   const [strategiesLoading, setStrategiesLoading] = useState(false);
   const [strategyWizardStep, setStrategyWizardStep] = useState(0);
+  const [showLivePreview, setShowLivePreview] = useState(false); // collapsed by default
   const [newStrategyConfig, setNewStrategyConfig] = useState(initialStrategyConfig());
   const [editingStrategyId, setEditingStrategyId] = useState(null);
   const [showNewStrategyForm, setShowNewStrategyForm] = useState(false);
@@ -1979,7 +1985,7 @@ const renderStrategyDetailModal = () => {
                 <p className="text-sm text-gray-400 mb-4">{detailApp.onboarding?.applicationId || '—'}</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div><span className="text-gray-500">Business Unit:</span> <span className="text-white">{detailApp.onboarding?.businessUnit || '—'}</span></div>
-                  <div><span className="text-gray-500">Team:</span> <span className="text-white">{detailApp.onboarding?.teamName || '—'}</span></div>
+                  <div><span className="text-gray-500">Project:</span> <span className="text-white">{detailApp.onboarding?.projectName || '—'}</span></div>
                   <div><span className="text-gray-500">Project Owner:</span> <span className="text-white">{detailApp.onboarding?.projectOwner || '—'}</span></div>
                   <div><span className="text-gray-500">Owner Email:</span> <span className="text-white">{detailApp.onboarding?.ownerEmail || '—'}</span></div>
                   <div><span className="text-gray-500">Resources:</span> <span className="text-white">{detailApp.resources?.length || 0}</span></div>
@@ -3385,11 +3391,28 @@ const renderStep4 = () => {
       <GlassCard>
         {renderWizardStepContent()}
         <div className="mt-6 pt-4 border-t border-white/[0.05]">
-          <p className="text-xs font-medium text-primary mb-2">Live Preview</p>
-          <VerticalPreview 
-            config={newStrategyConfig} 
-            environmentConfigs={envConfigsForPreview}
-          />
+          <button
+            type="button"
+            onClick={() => setShowLivePreview((v) => !v)}
+            className="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/10"
+          >
+            <span className="text-xs font-medium text-primary">Live Preview</span>
+            <div className="flex items-center gap-1.5">
+              {showLivePreview ? (
+                <ChevronUp className="h-4 w-4 text-primary transition-transform duration-200" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-primary transition-transform duration-200" />
+              )}
+            </div>
+          </button>
+          {showLivePreview && (
+            <div className="mt-2">
+              <VerticalPreview
+                config={newStrategyConfig}
+                environmentConfigs={envConfigsForPreview}
+              />
+            </div>
+          )}
         </div>
         <div className="flex justify-between mt-6 pt-4 border-t border-white/[0.05]">
           <Button variant="outline" onClick={() => setStrategyWizardStep(Math.max(0, strategyWizardStep - 1))} disabled={strategyWizardStep === 0} className="border-dark-600 text-gray-300">Back</Button>

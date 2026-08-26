@@ -151,7 +151,7 @@ function OrganizationsIndex() {
     <div className="w-full space-y-5 p-6">
       <SectionHead
         title="Onboarding"
-        sub="Org → Business Units → Projects → Applications → Developers → Consumers"
+        sub="Organization → Business Units → Projects → Applications → Developers → Consumers"
         action={
           <Btn v="ghost" sm onClick={() => setReloadKey((k) => k + 1)} disabled={isLoading}>
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} /> Refresh

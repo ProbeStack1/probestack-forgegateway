@@ -17,6 +17,12 @@ import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTar
 import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
 import { getProjects, getApplications } from "../../http-service/onboardingApi";
+import { POLICY_TYPE_TO_ELEMENT, MINIMAL_POLICY_XML, policyResourceFile, flattenPolicyLibrary } from "../../config/policyLibrary";
+
+// Two "base" shared flows every org ships with — never offered as a "Recommended"
+// framework since attaching a framework to itself/the base AI Gateway framework is meaningless.
+const EXCLUDED_RECOMMENDED_FRAMEWORKS = ["API-Runtime-Framework-V1", "SF-AIGatewayFramework-V1"];
+const POLICY_LIBRARY_FLAT = flattenPolicyLibrary();
 
 // Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
 // buried inside the fetch response's text body — surface the specific violation (e.g. which
@@ -105,7 +111,13 @@ export const ProxiesView = ({ showMessage }) => {
         zipFile: null,
         deploymentEnvs: [],
         resources: [{ method: "GET", path: "" }],
-        security: { oauth2: false, mtls: false, basicAuth: true },
+        // Attach Frameworks: "recommended" (curated framework shared flows) / "custom"
+        // (any global function) / "policy" (hand-picked policies) — mutually exclusive.
+        // frameworkAttachment resolves onto the ProxyEndpoint's PreFlow (client-facing
+        // side); backendFrameworkAttachment resolves onto the TargetEndpoint's PreFlow
+        // (backend-facing side) — same shape, different Apigee flow lane.
+        frameworkAttachment: { mode: "recommended", framework: "", policies: [] },
+        backendFrameworkAttachment: { mode: "recommended", framework: "", policies: [] },
         apiType: "REST",
         openApiSpecFile: null,
         specParsed: false,
@@ -149,6 +161,41 @@ export const ProxiesView = ({ showMessage }) => {
     const [loadingTargetServers, setLoadingTargetServers] = useState(false);
     const [targetServerApp, setTargetServerApp] = useState(null); // { name, id, onboardingId }
 
+    // Global Functions (Apigee shared flows) — source list for the "Attach Frameworks"
+    // Recommended/Custom Framework dropdowns.
+    const [globalFunctions, setGlobalFunctions] = useState([]);
+    const [loadingGlobalFunctions, setLoadingGlobalFunctions] = useState(false);
+
+    const fetchGlobalFunctions = async () => {
+        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+        if (!effectiveOrg) return;
+        setLoadingGlobalFunctions(true);
+        try {
+            const token = await fetchApigeeToken();
+            const res = await fetch(
+                `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/details`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (!res.ok) throw new Error(`Failed to fetch global functions: ${res.statusText}`);
+            const data = await res.json();
+            setGlobalFunctions(data.sharedFlows || []);
+        } catch (err) {
+            console.error("Failed to fetch global functions", err);
+            setGlobalFunctions([]);
+        } finally {
+            setLoadingGlobalFunctions(false);
+        }
+    };
+
+    // Recommended frameworks: any global function whose name identifies it as a
+    // framework, excluding the two base frameworks every org already ships with.
+    const recommendedFrameworks = useMemo(
+        () => globalFunctions.filter((sf) =>
+            sf.name?.toLowerCase().includes("framework") && !EXCLUDED_RECOMMENDED_FRAMEWORKS.includes(sf.name)
+        ),
+        [globalFunctions]
+    );
+
     const fetchProductsList = async () => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
         if (!effectiveOrg) return;
@@ -174,6 +221,14 @@ export const ProxiesView = ({ showMessage }) => {
             fetchProductsList();
         }
     }, [createProxyModal.open, productOption, selectedOrg]);
+
+    // Fetch global functions (shared flows) whenever the Create API dialog is open and
+    // an org is selected — feeds both the Recommended and Custom Framework dropdowns.
+    useEffect(() => {
+        if (createProxyModal.open && selectedOrg) {
+            fetchGlobalFunctions();
+        }
+    }, [createProxyModal.open, selectedOrg]);
 
     // const createNewProduct = async () => {
     //     const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
@@ -702,18 +757,105 @@ export const ProxiesView = ({ showMessage }) => {
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 
-    const generateProxyZip = async (template, { name, basePath, targetUrl, targetServer, resources = [], security = {} }) => {
+    // Downloads a shared flow's (framework's) latest revision bundle and pulls its
+    // individual policy XML files back out, so a "Recommended"/"Custom Framework"
+    // selection results in real, editable policies attached to the new API — the
+    // same policies Proxy Editor's listPolicyNames() will show when reopened later.
+    // Also carries over anything under .../resources/ (e.g. the .js a Javascript
+    // policy's <ResourceURL> resolves to) so extracted policies stay deployable
+    // instead of referencing a resource that no longer exists in the new bundle.
+    const extractFrameworkPolicies = async (effectiveOrg, token, sfName) => {
+        const detailsRes = await fetch(
+            `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/${sfName}/details`,
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!detailsRes.ok) throw new Error(`Failed to fetch details for framework "${sfName}"`);
+        const details = await detailsRes.json();
+        const latestRev = details?.sharedFlowDetails?.latestRevisionId;
+        if (!latestRev) throw new Error(`No revision found for framework "${sfName}"`);
+
+        const bundleRes = await fetch(
+            `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/sharedflows/${sfName}/revisions/${latestRev}/?format=bundle`,
+            { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!bundleRes.ok) throw new Error(`Failed to fetch bundle for framework "${sfName}"`);
+        const bundleZip = await JSZip.loadAsync(await bundleRes.blob());
+
+        const policyFiles = Object.values(bundleZip.files).filter(
+            (f) => !f.dir && f.name.includes("/policies/") && f.name.endsWith(".xml")
+        );
+        const policies = [];
+        for (const f of policyFiles) {
+            const xml = await f.async("string");
+            const policyName = f.name.split("/").pop().replace(/\.xml$/, "");
+            policies.push({ name: policyName, xml });
+        }
+
+        const resourceEntries = Object.values(bundleZip.files).filter(
+            (f) => !f.dir && f.name.includes("/resources/")
+        );
+        const resourceFiles = [];
+        for (const f of resourceEntries) {
+            const relPath = f.name.slice(f.name.indexOf("/resources/") + 1); // "resources/jsc/Name.js"
+            const isText = /\.(js|py|xsl|xslt|json|xml|properties|wsdl)$/i.test(relPath);
+            const content = await f.async(isText ? "string" : "base64");
+            resourceFiles.push({ path: relPath, content, binary: !isText });
+        }
+
+        return { policies, resourceFiles };
+    };
+
+    // Resolves the "Attach Frameworks" selection into { policies, resourceFiles } to
+    // bake into the generated bundle. "Policy" mode generates minimal policy definitions
+    // straight from the shared POLICY_LIBRARY catalog (plus a stub resource for any
+    // Javascript-backed ones); "Recommended"/"Custom Framework" mode extracts the real
+    // policies (and their resources) out of the selected framework.
+    const resolveAttachedPolicies = async (frameworkAttachment, effectiveOrg, token) => {
+        const mode = frameworkAttachment?.mode;
+        if (mode === "policy") {
+            const policies = [];
+            const resourceFiles = [];
+            (frameworkAttachment.policies || []).forEach((policyName) => {
+                const item = POLICY_LIBRARY_FLAT.find((p) => p.name === policyName);
+                const actualType = item ? (POLICY_TYPE_TO_ELEMENT[item.typeKey] || item.typeKey) : "Policy";
+                policies.push({ name: policyName, xml: MINIMAL_POLICY_XML(actualType, policyName) });
+                const resourceFile = policyResourceFile(actualType, policyName);
+                if (resourceFile) resourceFiles.push(resourceFile);
+            });
+            return { policies, resourceFiles };
+        }
+        if ((mode === "recommended" || mode === "custom") && frameworkAttachment.framework) {
+            return extractFrameworkPolicies(effectiveOrg, token, frameworkAttachment.framework);
+        }
+        return { policies: [], resourceFiles: [] };
+    };
+
+    const generateProxyZip = async (template, {
+        name, basePath, targetUrl, targetServer, resources = [],
+        // Attached to the ProxyEndpoint's PreFlow — the client-facing side of the proxy.
+        attachedPolicies = [], attachedResourceFiles = [],
+        // Attached to the TargetEndpoint's PreFlow — the backend-facing side, evaluated
+        // right before Apigee calls out to the actual backend service.
+        targetAttachedPolicies = [], targetAttachedResourceFiles = [],
+    }) => {
         const zip = new JSZip();
         const apiproxyFolder = zip.folder("apiproxy");
 
-        // OAuth 2.0 enforcement is a real, deployable Apigee policy — attach it as a
-        // PreFlow step so every request is verified before it reaches a resource flow.
-        // MTLS is intentionally NOT wired into the bundle here: mutual-TLS termination
-        // is configured at the environment/virtual-host level against a real keystore +
-        // truststore, which this dialog has no way to select — faking an <SSLInfo> block
-        // without one would either fail to deploy or silently do nothing.
-        const useOAuth2 = !!security.oauth2;
-        const policiesXml = useOAuth2 ? `<Policies><Policy>VerifyOAuthV2</Policy></Policies>` : "";
+        // De-dupe each lane by policy name in case a framework bundle repeats a name.
+        const uniqueProxyPolicies = Array.from(new Map(attachedPolicies.map((p) => [p.name, p])).values());
+        const uniqueTargetPolicies = Array.from(new Map(targetAttachedPolicies.map((p) => [p.name, p])).values());
+        const proxyPolicyNames = uniqueProxyPolicies.map((p) => p.name);
+        const targetPolicyNames = uniqueTargetPolicies.map((p) => p.name);
+
+        // apiproxy/policies/ is a single bundle-wide folder — merge both lanes into one
+        // manifest/file set (a name picked in both lanes only needs writing once).
+        const allPoliciesByName = new Map();
+        uniqueProxyPolicies.forEach((p) => allPoliciesByName.set(p.name, p));
+        uniqueTargetPolicies.forEach((p) => { if (!allPoliciesByName.has(p.name)) allPoliciesByName.set(p.name, p); });
+        const allPolicies = Array.from(allPoliciesByName.values());
+        const policiesXml = allPolicies.length > 0
+            ? `<Policies>${allPolicies.map((p) => `<Policy>${escapeXml(p.name)}</Policy>`).join("")}</Policies>`
+            : "";
 
         const apiProxyXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <APIProxy revision="1" name="${name}">
@@ -724,15 +866,20 @@ export const ProxiesView = ({ showMessage }) => {
 </APIProxy>`;
         apiproxyFolder.file(`${name}.xml`, apiProxyXml);
 
-        if (useOAuth2) {
+        if (allPolicies.length > 0) {
             const policiesFolder = apiproxyFolder.folder("policies");
-            const oauthPolicyXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<OAuthV2 name="VerifyOAuthV2">
-  <DisplayName>Verify OAuth v2.0 Access Token</DisplayName>
-  <Operation>VerifyAccessToken</Operation>
-</OAuthV2>`;
-            policiesFolder.file("VerifyOAuthV2.xml", oauthPolicyXml);
+            allPolicies.forEach((p) => policiesFolder.file(`${p.name}.xml`, p.xml));
         }
+
+        // Resources (e.g. the .js a Javascript policy's <ResourceURL> resolves to)
+        // that attached/extracted policies depend on — merged across both lanes and
+        // de-duped by path.
+        const allResourceFiles = Array.from(
+            new Map([...attachedResourceFiles, ...targetAttachedResourceFiles].map((r) => [r.path, r])).values()
+        );
+        allResourceFiles.forEach((r) => {
+            apiproxyFolder.file(r.path, r.content, r.binary ? { base64: true } : undefined);
+        });
 
         const proxiesFolder = apiproxyFolder.folder("proxies");
 
@@ -753,9 +900,9 @@ ${declaredResources.map((r, idx) => {
   </Flows>`
             : "";
 
-        const preFlowXml = useOAuth2
+        const proxyPreFlowXml = proxyPolicyNames.length > 0
             ? `<PreFlow name="PreFlow">
-    <Request><Step><Name>VerifyOAuthV2</Name></Step></Request>
+    <Request>${proxyPolicyNames.map((n) => `<Step><Name>${escapeXml(n)}</Name></Step>`).join("")}</Request>
     <Response/>
   </PreFlow>`
             : "";
@@ -763,29 +910,32 @@ ${declaredResources.map((r, idx) => {
         const proxyEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ProxyEndpoint name="default">
   <HTTPProxyConnection><BasePath>${basePath}</BasePath></HTTPProxyConnection>
-  ${preFlowXml}
+  ${proxyPreFlowXml}
   ${flowsXml}
   <RouteRule name="default"/>
 </ProxyEndpoint>`;
         proxiesFolder.file("default.xml", proxyEndpointXml);
         if (template === "reverse") {
             const targetsFolder = apiproxyFolder.folder("targets");
-            let targetEndpointXml = "";
-            if (targetServer) {
-                targetEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<TargetEndpoint name="default">
-  <HTTPTargetConnection>
+
+            const targetPreFlowXml = targetPolicyNames.length > 0
+                ? `<PreFlow name="PreFlow">
+    <Request>${targetPolicyNames.map((n) => `<Step><Name>${escapeXml(n)}</Name></Step>`).join("")}</Request>
+    <Response/>
+  </PreFlow>`
+                : "";
+            const httpTargetConnectionXml = targetServer
+                ? `<HTTPTargetConnection>
     <LoadBalancer>
       <Server name="${targetServer}"/>
     </LoadBalancer>
-  </HTTPTargetConnection>
-</TargetEndpoint>`;
-            } else {
-                targetEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  </HTTPTargetConnection>`
+                : `<HTTPTargetConnection><URL>${targetUrl}</URL></HTTPTargetConnection>`;
+            const targetEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <TargetEndpoint name="default">
-  <HTTPTargetConnection><URL>${targetUrl}</URL></HTTPTargetConnection>
+  ${targetPreFlowXml}
+  ${httpTargetConnectionXml}
 </TargetEndpoint>`;
-            }
             targetsFolder.file("default.xml", targetEndpointXml);
         }
         const content = await zip.generateAsync({ type: "blob" });
@@ -1006,23 +1156,64 @@ ${declaredResources.map((r, idx) => {
             showMessage("Please upload a valid OpenAPI specification file first.", "error");
             return;
         }
+        if ((modal.frameworkAttachment.mode === "recommended" || modal.frameworkAttachment.mode === "custom") && !modal.frameworkAttachment.framework) {
+            showMessage("Please select a framework to attach to the proxy.", "error");
+            return;
+        }
+        if (modal.frameworkAttachment.mode === "policy" && modal.frameworkAttachment.policies.length === 0) {
+            showMessage("Please select at least one policy to attach to the proxy.", "error");
+            return;
+        }
+        // Backend/target attachment only applies to templates that actually get a
+        // TargetEndpoint in the generated bundle (see generateProxyZip's `template === "reverse"` gate).
+        if (modal.template === "reverse") {
+            if ((modal.backendFrameworkAttachment.mode === "recommended" || modal.backendFrameworkAttachment.mode === "custom") && !modal.backendFrameworkAttachment.framework) {
+                showMessage("Please select a framework to attach to the backend service.", "error");
+                return;
+            }
+            if (modal.backendFrameworkAttachment.mode === "policy" && modal.backendFrameworkAttachment.policies.length === 0) {
+                showMessage("Please select at least one policy to attach to the backend service.", "error");
+                return;
+            }
+        }
 
         const token = await fetchApigeeToken();
         if (!token) {
             showMessage("Failed to obtain authentication token.", "error");
             return;
         }
+        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
 
         try {
             let zipToUpload = null;
             if (modal.template === "reverse" || modal.template === "no-target") {
+                let attachedPolicies = [];
+                let attachedResourceFiles = [];
+                let targetAttachedPolicies = [];
+                let targetAttachedResourceFiles = [];
+                try {
+                    const resolved = await resolveAttachedPolicies(modal.frameworkAttachment, effectiveOrg, token);
+                    attachedPolicies = resolved.policies;
+                    attachedResourceFiles = resolved.resourceFiles;
+                    if (modal.template === "reverse") {
+                        const targetResolved = await resolveAttachedPolicies(modal.backendFrameworkAttachment, effectiveOrg, token);
+                        targetAttachedPolicies = targetResolved.policies;
+                        targetAttachedResourceFiles = targetResolved.resourceFiles;
+                    }
+                } catch (err) {
+                    showMessage(`Failed to resolve attached framework: ${err.message}`, "error");
+                    return;
+                }
                 zipToUpload = await generateProxyZip(modal.template, {
                     name: modal.name,
                     basePath: modal.basePath,
                     targetUrl: modal.targetUrl,
                     targetServer: backendOption === "existing" ? selectedTargetServer : null,
                     resources: modal.resources,
-                    security: modal.security,
+                    attachedPolicies,
+                    attachedResourceFiles,
+                    targetAttachedPolicies,
+                    targetAttachedResourceFiles,
                 });
             } else if (modal.template === "upload") {
                 zipToUpload = modal.zipFile;
@@ -1033,7 +1224,6 @@ ${declaredResources.map((r, idx) => {
 
             const formData = new FormData();
             formData.append("file", zipToUpload);
-        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
             const uploadUrl = `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/apis?action=import&name=${encodeURIComponent(modal.name)}`;
             const response = await fetch(uploadUrl, {
                 method: "POST",
@@ -1066,8 +1256,8 @@ ${declaredResources.map((r, idx) => {
                 }),
                 body: JSON.stringify({
                     operation: "CREATE",
-                    requestPayload: { name: modal.name, apiType: selectedApiType, resources: modal.resources, security: modal.security },
-                    afterSnapshot: { ...createdApi, apiType: selectedApiType, resources: modal.resources, security: modal.security },
+                    requestPayload: { name: modal.name, apiType: selectedApiType, resources: modal.resources, frameworkAttachment: modal.frameworkAttachment, backendFrameworkAttachment: modal.backendFrameworkAttachment },
+                    afterSnapshot: { ...createdApi, apiType: selectedApiType, resources: modal.resources, frameworkAttachment: modal.frameworkAttachment, backendFrameworkAttachment: modal.backendFrameworkAttachment },
                     responsePayload: createdApi,
                 }),
             });
@@ -1788,50 +1978,129 @@ ${declaredResources.map((r, idx) => {
                                                 ))}
                                             </div>
                                         </div>
-                                        {/* Security — mutually exclusive, so a radio group rather than independent checkboxes */}
-                                        <div>
-                                            <label className="text-sm font-medium text-white">Security</label>
+                                        {/* Attach Frameworks — mutually exclusive source for how policies get
+                                            attached to this API: a curated recommended framework, any other
+                                            global function (shared flow), or a hand-picked set of policies.
+                                            Whatever resolves here is baked into the generated bundle as real
+                                            policy files, so Proxy Editor shows them when the API is reopened. */}
+                                        <div className="space-y-3">
+                                            <label className="text-sm font-medium text-white">Attach Frameworks — Proxy</label>
                                             <div className="mt-2 flex flex-wrap gap-4">
                                                 <label className="flex items-center gap-2">
                                                     <input
                                                         type="radio"
-                                                        name="create-proxy-security"
-                                                        checked={createProxyModal.security.basicAuth}
+                                                        name="create-proxy-framework-attachment"
+                                                        checked={createProxyModal.frameworkAttachment.mode === "recommended"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: false, mtls: false, basicAuth: true },
+                                                            frameworkAttachment: { mode: "recommended", framework: "", policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">Basic Auth</span>
+                                                    <span className="text-white">Recommended</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
                                                         type="radio"
-                                                        name="create-proxy-security"
-                                                        checked={createProxyModal.security.oauth2}
+                                                        name="create-proxy-framework-attachment"
+                                                        checked={createProxyModal.frameworkAttachment.mode === "custom"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: true, mtls: false, basicAuth: false },
+                                                            frameworkAttachment: { mode: "custom", framework: "", policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">OAuth 2.0</span>
+                                                    <span className="text-white">Custom Framework</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
                                                         type="radio"
-                                                        name="create-proxy-security"
-                                                        checked={createProxyModal.security.mtls}
+                                                        name="create-proxy-framework-attachment"
+                                                        checked={createProxyModal.frameworkAttachment.mode === "policy"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            security: { oauth2: false, mtls: true, basicAuth: false },
+                                                            frameworkAttachment: { mode: "policy", framework: "", policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">mTLS</span>
+                                                    <span className="text-white">Policy</span>
                                                 </label>
                                             </div>
+
+                                            {createProxyModal.frameworkAttachment.mode === "recommended" && (
+                                                <div>
+                                                    {loadingGlobalFunctions ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                    ) : recommendedFrameworks.length === 0 ? (
+                                                        <p className="mt-1 text-sm text-amber-400">No recommended frameworks available.</p>
+                                                    ) : (
+                                                        <select
+                                                            value={createProxyModal.frameworkAttachment.framework}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                frameworkAttachment: { ...prev.frameworkAttachment, framework: e.target.value },
+                                                            }))}
+                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            <option value="">Select a recommended framework</option>
+                                                            {recommendedFrameworks.map((sf) => (
+                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {createProxyModal.frameworkAttachment.mode === "custom" && (
+                                                <div>
+                                                    {loadingGlobalFunctions ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                    ) : globalFunctions.length === 0 ? (
+                                                        <p className="mt-1 text-sm text-amber-400">No global functions available.</p>
+                                                    ) : (
+                                                        <select
+                                                            value={createProxyModal.frameworkAttachment.framework}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                frameworkAttachment: { ...prev.frameworkAttachment, framework: e.target.value },
+                                                            }))}
+                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            <option value="">Select a global function</option>
+                                                            {globalFunctions.map((sf) => (
+                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {createProxyModal.frameworkAttachment.mode === "policy" && (
+                                                <div className="bg-[#0f1117] rounded-lg border border-[#2a3550] p-3 max-h-48 overflow-y-auto">
+                                                    <div className="space-y-2">
+                                                        {POLICY_LIBRARY_FLAT.map((policy) => (
+                                                            <label key={policy.name} className="flex items-center gap-2 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    value={policy.name}
+                                                                    checked={createProxyModal.frameworkAttachment.policies.includes(policy.name)}
+                                                                    onChange={(e) => setCreateProxyModal(prev => {
+                                                                        const current = prev.frameworkAttachment.policies;
+                                                                        const policies = e.target.checked
+                                                                            ? [...current, policy.name]
+                                                                            : current.filter((p) => p !== policy.name);
+                                                                        return { ...prev, frameworkAttachment: { ...prev.frameworkAttachment, policies } };
+                                                                    })}
+                                                                    className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                                />
+                                                                <policy.icon className="h-4 w-4 text-slate-300 shrink-0" />
+                                                                <span className="text-white text-sm">{policy.name}</span>
+                                                                <span className="text-xs text-slate-500">({policy.cat})</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     </>
                                 )}
@@ -1906,6 +2175,129 @@ ${declaredResources.map((r, idx) => {
                                                 </p>
                                             </div>
                                         )}
+
+                                        {/* Attach Frameworks — Backend Service — same three-way source as the proxy's,
+                                            but resolves onto the TargetEndpoint's PreFlow instead of the ProxyEndpoint's,
+                                            so these policies run right before Apigee calls out to the backend. */}
+                                        <div className="space-y-3 border-t border-[#27314e] pt-3">
+                                            <label className="text-sm font-medium text-white">Attach Frameworks — Backend Service</label>
+                                            <div className="mt-2 flex flex-wrap gap-4">
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="create-proxy-backend-framework-attachment"
+                                                        checked={createProxyModal.backendFrameworkAttachment.mode === "recommended"}
+                                                        onChange={() => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            backendFrameworkAttachment: { mode: "recommended", framework: "", policies: [] },
+                                                        }))}
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">Recommended</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="create-proxy-backend-framework-attachment"
+                                                        checked={createProxyModal.backendFrameworkAttachment.mode === "custom"}
+                                                        onChange={() => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            backendFrameworkAttachment: { mode: "custom", framework: "", policies: [] },
+                                                        }))}
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">Custom Framework</span>
+                                                </label>
+                                                <label className="flex items-center gap-2">
+                                                    <input
+                                                        type="radio"
+                                                        name="create-proxy-backend-framework-attachment"
+                                                        checked={createProxyModal.backendFrameworkAttachment.mode === "policy"}
+                                                        onChange={() => setCreateProxyModal(prev => ({
+                                                            ...prev,
+                                                            backendFrameworkAttachment: { mode: "policy", framework: "", policies: [] },
+                                                        }))}
+                                                        className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white">Policy</span>
+                                                </label>
+                                            </div>
+
+                                            {createProxyModal.backendFrameworkAttachment.mode === "recommended" && (
+                                                <div>
+                                                    {loadingGlobalFunctions ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                    ) : recommendedFrameworks.length === 0 ? (
+                                                        <p className="mt-1 text-sm text-amber-400">No recommended frameworks available.</p>
+                                                    ) : (
+                                                        <select
+                                                            value={createProxyModal.backendFrameworkAttachment.framework}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, framework: e.target.value },
+                                                            }))}
+                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            <option value="">Select a recommended framework</option>
+                                                            {recommendedFrameworks.map((sf) => (
+                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {createProxyModal.backendFrameworkAttachment.mode === "custom" && (
+                                                <div>
+                                                    {loadingGlobalFunctions ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                    ) : globalFunctions.length === 0 ? (
+                                                        <p className="mt-1 text-sm text-amber-400">No global functions available.</p>
+                                                    ) : (
+                                                        <select
+                                                            value={createProxyModal.backendFrameworkAttachment.framework}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, framework: e.target.value },
+                                                            }))}
+                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            <option value="">Select a global function</option>
+                                                            {globalFunctions.map((sf) => (
+                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {createProxyModal.backendFrameworkAttachment.mode === "policy" && (
+                                                <div className="bg-[#0f1117] rounded-lg border border-[#2a3550] p-3 max-h-48 overflow-y-auto">
+                                                    <div className="space-y-2">
+                                                        {POLICY_LIBRARY_FLAT.map((policy) => (
+                                                            <label key={policy.name} className="flex items-center gap-2 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    value={policy.name}
+                                                                    checked={createProxyModal.backendFrameworkAttachment.policies.includes(policy.name)}
+                                                                    onChange={(e) => setCreateProxyModal(prev => {
+                                                                        const current = prev.backendFrameworkAttachment.policies;
+                                                                        const policies = e.target.checked
+                                                                            ? [...current, policy.name]
+                                                                            : current.filter((p) => p !== policy.name);
+                                                                        return { ...prev, backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, policies } };
+                                                                    })}
+                                                                    className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                                />
+                                                                <policy.icon className="h-4 w-4 text-slate-300 shrink-0" />
+                                                                <span className="text-white text-sm">{policy.name}</span>
+                                                                <span className="text-xs text-slate-500">({policy.cat})</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                                 {(createProxyModal.template === "reverse" || createProxyModal.template === "reverse-openapi") && (

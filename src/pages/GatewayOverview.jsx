@@ -452,6 +452,45 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             )}
           </div>
 
+          {/* Management Section */}
+          <div>
+            <div className={sectionHeaderClass} onClick={() => toggleSection("management")}>
+              {sectionsExpanded.management ? (
+                <ChevronDown className="h-4 w-4 text-[#f472b6]" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-[#f472b6]" />
+              )}
+              {!sidebarCollapsed && (
+                <span className="text-xs font-semibold uppercase text-[#5a6a8a]">Management</span>
+              )}
+            </div>
+            {sectionsExpanded.management && (
+              <div className="space-y-1 mt-1">
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "environments")}
+                  onClick={() => selectSidebarMenu("environments")}
+                >
+                  <CpuIcon className={sidebarIconClass(selectedMenuItem === "environments", "text-amber-500")} />
+                  {!sidebarCollapsed && <span>Environments</span>}
+                </div>
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "gateway-env")}
+                  onClick={() => selectSidebarMenu("gateway-env")}
+                >
+                  <Aperture className={sidebarIconClass(selectedMenuItem === "gateway-env", "text-lime-500")} />
+                  {!sidebarCollapsed && <span>Gateway</span>}
+                </div>
+                <div
+                  className={sidebarItemClass(selectedMenuItem === "cicd-automation")}
+                  onClick={() => selectSidebarMenu("cicd-automation")}
+                >
+                  <GitMerge className={sidebarIconClass(selectedMenuItem === "cicd-automation", "text-orange-400")} />
+                  {!sidebarCollapsed && <span>CI/CD Automation</span>}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Governance Section (Analytics) */}
           <div>
             <div className={sectionHeaderClass} onClick={() => toggleSection("analytics")}>
@@ -573,45 +612,6 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                 >
                   <BarChart2 className={sidebarIconClass(selectedMenuItem === "observability-report", "text-fuchsia-300")} />
                   {!sidebarCollapsed && <span>Report</span>}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Management Section */}
-          <div>
-            <div className={sectionHeaderClass} onClick={() => toggleSection("management")}>
-              {sectionsExpanded.management ? (
-                <ChevronDown className="h-4 w-4 text-[#f472b6]" />
-              ) : (
-                <ChevronRight className="h-4 w-4 text-[#f472b6]" />
-              )}
-              {!sidebarCollapsed && (
-                <span className="text-xs font-semibold uppercase text-[#5a6a8a]">Management</span>
-              )}
-            </div>
-            {sectionsExpanded.management && (
-              <div className="space-y-1 mt-1">
-                <div
-                  className={sidebarItemClass(selectedMenuItem === "environments")}
-                  onClick={() => selectSidebarMenu("environments")}
-                >
-                  <CpuIcon className={sidebarIconClass(selectedMenuItem === "environments", "text-amber-500")} />
-                  {!sidebarCollapsed && <span>Environments</span>}
-                </div>
-                <div
-                  className={sidebarItemClass(selectedMenuItem === "gateway-env")}
-                  onClick={() => selectSidebarMenu("gateway-env")}
-                >
-                  <Aperture className={sidebarIconClass(selectedMenuItem === "gateway-env", "text-lime-500")} />
-                  {!sidebarCollapsed && <span>Gateway</span>}
-                </div>
-                <div
-                  className={sidebarItemClass(selectedMenuItem === "cicd-automation")}
-                  onClick={() => selectSidebarMenu("cicd-automation")}
-                >
-                  <GitMerge className={sidebarIconClass(selectedMenuItem === "cicd-automation", "text-orange-400")} />
-                  {!sidebarCollapsed && <span>CI/CD Automation</span>}
                 </div>
               </div>
             )}

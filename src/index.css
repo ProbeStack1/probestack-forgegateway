@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * probestack-ui-library CSS-cascade fix (Tailwind v3 app + Tailwind v4 library).
+ *
+ * The library's own utilities (e.g. .translate-x-full, used by its Light/Dark
+ * toggle slide) live inside a native CSS `@layer utilities` block. This app's
+ * own Tailwind v3 preflight resets the same --tw-translate-x/--tw-translate-y
+ * custom properties via a plain, UNLAYERED `*, ::before, ::after { ... }`
+ * rule. Per the CSS cascade spec, an unlayered rule always wins over a
+ * layered one, REGARDLESS of specificity — so the library's own (far more
+ * specific, correctly .probestack-ui-library-scoped) utility value silently
+ * loses every time, e.g. a toggle's slide indicator staying stuck at
+ * translate-x-0 even when translate-x-full is the applied class.
+ * Re-declaring the same utilities here — unlayered, same scope — lets them
+ * win again. Add more pairs here if another library transform utility
+ * (rotate-/scale-/skew-/translate-y-) shows the same "class is right,
+ * computed style is wrong" symptom.
+ */
+.probestack-ui-library .translate-x-0 {
+  --tw-translate-x: 0px;
+  translate: var(--tw-translate-x) var(--tw-translate-y);
+}
+.probestack-ui-library .translate-x-full {
+  --tw-translate-x: 100%;
+  translate: var(--tw-translate-x) var(--tw-translate-y);
+}
+/* Same collision, this time on `transition-transform`: this app's own
+ * (unlayered) .transition-transform only lists `transform` in
+ * transition-property, so the `translate` property change above would snap
+ * instantly instead of sliding. The library's version also transitions
+ * translate/scale/rotate — restored here, unlayered, so the slide animates. */
+.probestack-ui-library .transition-transform {
+  transition-property: transform, translate, scale, rotate;
+}
+
 @keyframes shimmer {
   0% {
     transform: translateX(-140%) skewX(-18deg);

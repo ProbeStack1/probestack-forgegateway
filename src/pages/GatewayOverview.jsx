@@ -144,7 +144,11 @@ export const ProxyDetailViewWrapper = ({ showMessage, backPath = '/gateway/proxy
 
   useEffect(() => {
     const proxyFromState = location.state?.proxy;
-    if (proxyFromState && proxyFromState.name === proxyName) {
+    // Only short-circuit on router state when it actually carries the lifecycle fields
+    // ProxyDetailView needs (source/lifecycle) — a bare `{ name }` (e.g. from the Gateway
+    // Dashboard's row click) would otherwise permanently skip the fetch below and lose
+    // them for the whole session, breaking the OpenAPI Specification card silently.
+    if (proxyFromState && proxyFromState.name === proxyName && (proxyFromState.source || proxyFromState.lifecycle)) {
       setProxy(proxyFromState);
       return;
     }
@@ -159,8 +163,18 @@ export const ProxyDetailViewWrapper = ({ showMessage, backPath = '/gateway/proxy
         );
         if (!response.ok) throw new Error("Proxy not found");
         const data = await response.json();
-        // Build a proxy object that matches the expected shape in ProxyDetailView
-        setProxy({ name: proxyName, ...data.proxy });
+        // Build a proxy object that matches the expected shape in ProxyDetailView.
+        // `data.proxy` is the raw nested Apigee proxy resource — source/lifecycle/
+        // createdInLifecycleTool live on the envelope itself (getApiDetails), not inside
+        // it, so they must be spread in explicitly or every proxy looks like it was never
+        // created via the lifecycle tool regardless of how it actually was.
+        setProxy({
+          name: proxyName,
+          ...data.proxy,
+          source: data.source,
+          lifecycle: data.lifecycle,
+          createdInLifecycleTool: data.createdInLifecycleTool,
+        });
       } catch (err) {
         console.error(err);
         showMessage(`Could not load proxy: ${err.message}`, "error");

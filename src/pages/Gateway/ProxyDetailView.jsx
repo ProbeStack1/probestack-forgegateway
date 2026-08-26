@@ -99,12 +99,22 @@ const parseTargetEndpointXml = (xmlString) => {
     return { name, url, targetServer };
 };
 
+// KVM policies are the only place a proxy names a Key Value Map — Apigee's revision JSON
+// only lists policy names, not their XML config, so this has to come out of the bundle.
+const parseKvmNameFromPolicyXml = (xmlString) => {
+    const doc = xmlParser.parseFromString(xmlString, "application/xml");
+    const root = doc.querySelector("KeyValueMapOperations");
+    if (!root) return null;
+    return root.getAttribute("mapIdentifier") || xmlText(root.querySelector("MapName")) || null;
+};
+
 const parseProxyBundle = async (blob) => {
     const zip = await JSZip.loadAsync(blob);
     const filePaths = Object.keys(zip.files).filter((path) => !zip.files[path].dir);
 
     const proxyEndpointPaths = filePaths.filter((path) => path.includes("/proxies/") && path.endsWith(".xml"));
     const targetEndpointPaths = filePaths.filter((path) => path.includes("/targets/") && path.endsWith(".xml"));
+    const policyPaths = filePaths.filter((path) => path.includes("/policies/") && path.endsWith(".xml"));
 
     const proxyEndpoints = (await Promise.all(
         proxyEndpointPaths.map(async (path) => parseProxyEndpointXml(await zip.files[path].async("text")))
@@ -114,7 +124,11 @@ const parseProxyBundle = async (blob) => {
         targetEndpointPaths.map(async (path) => parseTargetEndpointXml(await zip.files[path].async("text")))
     )).filter(Boolean);
 
-    return { proxyEndpoints, targetEndpoints };
+    const kvmNames = [...new Set((await Promise.all(
+        policyPaths.map(async (path) => parseKvmNameFromPolicyXml(await zip.files[path].async("text")))
+    )).filter(Boolean))];
+
+    return { proxyEndpoints, targetEndpoints, kvmNames };
 };
 
 // Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
@@ -210,6 +224,17 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
     const [targetEndpointsList, setTargetEndpointsList] = useState([]);
     const [loadingEndpointDetails, setLoadingEndpointDetails] = useState(false);
     const [expandedEndpoints, setExpandedEndpoints] = useState({});
+
+    // "Configuration Overview" — KVM names referenced by this proxy's policies (parsed out
+    // of the bundle, same as proxyEndpoints/targetEndpointsList above), plus the API
+    // Products/Apps/Developers that reference this proxy (Apigee has no direct
+    // "products/apps for proxy X" endpoint — Product is the only thing that names a proxy,
+    // so Products are resolved first and Apps/Developers are derived by product).
+    const [referencedKvms, setReferencedKvms] = useState([]);
+    const [linkedProducts, setLinkedProducts] = useState([]);
+    const [linkedApps, setLinkedApps] = useState([]);
+    const [linkedDeveloperEmails, setLinkedDeveloperEmails] = useState([]);
+    const [loadingConfigOverview, setLoadingConfigOverview] = useState(false);
 
     // Apigee returns no field for a proxy's URL — it's composed from two unrelated places.
     // This org talks to apigee.googleapis.com, i.e. Apigee X/hybrid, where the host half
@@ -1605,6 +1630,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         if (!proxy?.name || !latestRev) {
             setProxyEndpoints([]);
             setTargetEndpointsList([]);
+            setReferencedKvms([]);
             return;
         }
 
@@ -1618,16 +1644,18 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                 const response = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
                 if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 const blob = await response.blob();
-                const { proxyEndpoints: parsedProxyEndpoints, targetEndpoints: parsedTargetEndpoints } = await parseProxyBundle(blob);
+                const { proxyEndpoints: parsedProxyEndpoints, targetEndpoints: parsedTargetEndpoints, kvmNames } = await parseProxyBundle(blob);
                 if (cancelled) return;
                 setProxyEndpoints(parsedProxyEndpoints);
                 setTargetEndpointsList(parsedTargetEndpoints);
+                setReferencedKvms(kvmNames);
                 setExpandedEndpoints({}); // closed by default
             } catch (err) {
                 console.error('Error parsing proxy bundle for endpoint details:', err);
                 if (!cancelled) {
                     setProxyEndpoints([]);
                     setTargetEndpointsList([]);
+                    setReferencedKvms([]);
                 }
             } finally {
                 if (!cancelled) setLoadingEndpointDetails(false);
@@ -1637,6 +1665,81 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         loadEndpointDetails();
         return () => { cancelled = true; };
     }, [proxy?.name, proxyDetails?.proxy?.latestRevisionId]);
+
+    // "Configuration Overview" — Products/Apps/Developers linked to this proxy. Apigee has
+    // no "products/apps for proxy X" endpoint: API Product is the only entity that actually
+    // names a proxy (legacy `proxies[]` or OAS-based `operationGroup.operationConfigs[].apiSource`),
+    // and Apps only ever reference a Product — so Products are resolved first, then each
+    // matched product's subscribed Apps (and their owning Developers) are fetched by product.
+    useEffect(() => {
+        if (!proxy?.name) {
+            setLinkedProducts([]);
+            setLinkedApps([]);
+            setLinkedDeveloperEmails([]);
+            return;
+        }
+
+        let cancelled = false;
+        const loadLinkedProductsAndApps = async () => {
+            setLoadingConfigOverview(true);
+            try {
+                const token = await fetchToken();
+                if (!token) throw new Error('Failed to obtain access token');
+
+                const productsRes = await fetch(
+                    `https://apigee.googleapis.com/v1/organizations/gen-ai-poc-onboarding/apiproducts?expand=true`,
+                    { headers: { 'Authorization': `Bearer ${token}` } }
+                );
+                if (!productsRes.ok) throw new Error(`HTTP ${productsRes.status}: ${productsRes.statusText}`);
+                const productsData = await productsRes.json();
+                const allProducts = productsData.apiProduct || [];
+                const matchedProducts = allProducts.filter((p) => {
+                    if (Array.isArray(p.proxies) && p.proxies.includes(proxy.name)) return true;
+                    const operationConfigs = p.operationGroup?.operationConfigs || [];
+                    return operationConfigs.some((oc) => oc.apiSource === proxy.name);
+                });
+                if (cancelled) return;
+                setLinkedProducts(matchedProducts.map((p) => ({ name: p.name })));
+
+                if (matchedProducts.length === 0) {
+                    setLinkedApps([]);
+                    setLinkedDeveloperEmails([]);
+                    return;
+                }
+
+                const appsPerProduct = await Promise.all(matchedProducts.map(async (p) => {
+                    try {
+                        const res = await fetch(
+                            `https://forgegateway.probestack.io/apigee-wrapper/organizations/gen-ai-poc-onboarding/apps?apiProduct=${encodeURIComponent(p.name)}`,
+                            { headers: { 'Authorization': `Bearer ${token}` } }
+                        );
+                        if (!res.ok) return [];
+                        const data = await res.json();
+                        return data.app || [];
+                    } catch {
+                        return [];
+                    }
+                }));
+                if (cancelled) return;
+                const flatApps = appsPerProduct.flat();
+                const uniqueApps = Array.from(new Map(flatApps.map((a) => [a.name || a.appId, a])).values());
+                setLinkedApps(uniqueApps.map((a) => ({ name: a.name || a.appId, developerId: a.developerId })));
+                setLinkedDeveloperEmails([...new Set(uniqueApps.map((a) => a.developerId).filter(Boolean))]);
+            } catch (err) {
+                console.error('Error loading linked products/apps for Configuration Overview:', err);
+                if (!cancelled) {
+                    setLinkedProducts([]);
+                    setLinkedApps([]);
+                    setLinkedDeveloperEmails([]);
+                }
+            } finally {
+                if (!cancelled) setLoadingConfigOverview(false);
+            }
+        };
+
+        loadLinkedProductsAndApps();
+        return () => { cancelled = true; };
+    }, [proxy?.name]);
 
     // Resolve the host half of the proxy's URL. This org is Apigee X/hybrid (it talks to
     // apigee.googleapis.com), where hostnames live on ENVIRONMENT GROUPS, not the Edge-only
@@ -3033,7 +3136,9 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <h4 className="text-sm font-semibold text-white">Backend Service</h4>
                                         </div>
                                         <p className="text-sm text-slate-300 break-all">
-                                            {getLatestRevisionData()?.targetUrl || getLatestRevisionData()?.targetServer || 'Not configured'}
+                                            {targetEndpointsList.length > 0
+                                                ? targetEndpointsList.map((te) => te.url || te.targetServer).filter(Boolean).join(', ') || 'Not configured'
+                                                : 'Not configured'}
                                         </p>
                                     </div>
 
@@ -3043,7 +3148,13 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <Key className="h-4 w-4 text-purple-400" />
                                             <h4 className="text-sm font-semibold text-white">KVM</h4>
                                         </div>
-                                        <p className="text-sm text-slate-400">Not configured</p>
+                                        {loadingConfigOverview ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                        ) : referencedKvms.length > 0 ? (
+                                            <p className="text-sm text-slate-300 break-all">{referencedKvms.join(', ')}</p>
+                                        ) : (
+                                            <p className="text-sm text-slate-400">Not configured</p>
+                                        )}
                                     </div>
 
                                     {/* Product */}
@@ -3052,7 +3163,13 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <Package className="h-4 w-4 text-amber-400" />
                                             <h4 className="text-sm font-semibold text-white">Product</h4>
                                         </div>
-                                        <p className="text-sm text-slate-400">Not configured</p>
+                                        {loadingConfigOverview ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                        ) : linkedProducts.length > 0 ? (
+                                            <p className="text-sm text-slate-300 break-all">{linkedProducts.map((p) => p.name).join(', ')}</p>
+                                        ) : (
+                                            <p className="text-sm text-slate-400">Not configured</p>
+                                        )}
                                     </div>
 
                                     {/* App */}
@@ -3061,7 +3178,15 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <Database className="h-4 w-4 text-sky-400" />
                                             <h4 className="text-sm font-semibold text-white">App</h4>
                                         </div>
-                                        <p className="text-sm text-slate-400">Not configured</p>
+                                        {loadingConfigOverview ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                        ) : linkedApps.length > 0 ? (
+                                            <p className="text-sm text-slate-300 break-all">{linkedApps.map((a) => a.name).join(', ')}</p>
+                                        ) : linkedProducts.length > 0 ? (
+                                            <p className="text-sm text-slate-400">No apps subscribed</p>
+                                        ) : (
+                                            <p className="text-sm text-slate-400">Not configured</p>
+                                        )}
                                     </div>
 
                                     {/* Developer */}
@@ -3070,9 +3195,15 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                             <User className="h-4 w-4 text-indigo-400" />
                                             <h4 className="text-sm font-semibold text-white">Developer</h4>
                                         </div>
-                                        <p className="text-sm text-slate-300">
-                                            {proxyDetails?.audit?.registry?.createdBy || proxyDetails?.audit?.registry?.updatedBy || proxyDetails?.proxy?.metaData?.createdBy || proxyDetails?.proxy?.metaData?.lastModifiedBy || '—'}
-                                        </p>
+                                        {loadingConfigOverview ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                                        ) : linkedDeveloperEmails.length > 0 ? (
+                                            <p className="text-sm text-slate-300 break-all">{linkedDeveloperEmails.join(', ')}</p>
+                                        ) : (
+                                            <p className="text-sm text-slate-300">
+                                                {proxyDetails?.audit?.registry?.createdBy || proxyDetails?.audit?.registry?.updatedBy || proxyDetails?.proxy?.metaData?.createdBy || proxyDetails?.proxy?.metaData?.lastModifiedBy || '—'}
+                                            </p>
+                                        )}
                                     </div>
 
                                     {/* OpenAPI Specification - simplified: only name, preview, download */}

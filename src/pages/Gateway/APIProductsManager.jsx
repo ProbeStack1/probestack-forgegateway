@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Edit, Trash2, Plus, ArrowLeft, Loader2, Copy, GitBranch, X, Eye } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Edit, Trash2, Plus, ArrowLeft, Loader2, Copy, GitBranch, X, Eye, RefreshCw } from 'lucide-react';
 import { GatewayContextSelector } from './GatewayContextSelector';
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import ResourceAuditDetails from './ResourceAuditDetails';
@@ -32,6 +33,7 @@ const APIProductsManager = ({
   developerEmail: externalDeveloperEmail = 'jagruti.d@krelixir.com',
   showMessage,
 }) => {
+  const navigate = useNavigate();
   const [selectedOrg, setSelectedOrg] = useState(externalOrg || fallbackOrg);
   const [selectedBU, setSelectedBU] = useState(externalBU || '');
   const [selectedEnv, setSelectedEnv] = useState(externalEnv || fallbackEnv);
@@ -633,19 +635,12 @@ const APIProductsManager = ({
     return (
       <div className="p-4 space-y-2">
         <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
-        <h2 className="text-2xl font-bold text-white mb-1">API Products</h2>
-        <p className="text-sm text-gray-400" style={{marginBottom:"1rem"}}>Define and manage API product bundles</p>
         <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
-          <GatewayContextSelector
-            selectedOrg={selectedOrg}
-            setSelectedOrg={handleOrgChange}
-            selectedBU={selectedBU}
-            setSelectedBU={handleBUChange}
-            selectedEnv={selectedEnv}
-            setSelectedEnv={handleEnvChange}
-            showEnv={true}
-          />
-          <div className="flex gap-2">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-1">API Products</h2>
+            <p className="text-sm text-gray-400">Define and manage API product bundles</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5a6a8a]" />
               <input
@@ -657,12 +652,30 @@ const APIProductsManager = ({
               />
             </div>
             <button
+              onClick={() => navigate('/gateway/products/sync')}
+              className="px-3 py-1.5 bg-dark-700 text-gray-300 rounded-md text-sm font-medium hover:bg-dark-600 flex items-center gap-1"
+            >
+              <RefreshCw size={16} /> Sync
+            </button>
+            <button
               onClick={handleCreate}
               className="px-3 py-1.5 bg-[#ff5b1f] text-white rounded-md text-sm font-medium hover:bg-[#ff6b36] flex items-center gap-1"
             >
               <Plus size={16} /> Create
             </button>
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <GatewayContextSelector
+            selectedOrg={selectedOrg}
+            setSelectedOrg={handleOrgChange}
+            selectedBU={selectedBU}
+            setSelectedBU={handleBUChange}
+            selectedEnv={selectedEnv}
+            setSelectedEnv={handleEnvChange}
+            showEnv={true}
+          />
         </div>
 
         {loadingProducts ? (

@@ -865,7 +865,10 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
                     <Plus size={16} /> Create
                   </button>
 
-                  <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600" onClick={() => setIsTSSyncModal(true)}>
+                  <button
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"
+                    onClick={() => (isGatewayEnvironmentsPage ? navigate('/gateway/environments/target-server/sync') : setIsTSSyncModal(true))}
+                  >
                     <RefreshCw size={16} /> Sync
                   </button>
 
@@ -1052,7 +1055,10 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
                     <Plus size={16} /> Create
                   </button>
 
-                  <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600" onClick={() => setIsKVMSyncModal(true)}>
+                  <button
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"
+                    onClick={() => (isGatewayEnvironmentsPage ? navigate('/gateway/environments/kvm/sync') : setIsKVMSyncModal(true))}
+                  >
                     <RefreshCw size={16} /> Sync
                   </button>
                 </div>
@@ -1497,6 +1503,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
                   </p>
                 </div>
                 <div className="flex gap-3">
+                  
                   <button
                     onClick={() => {
                       setKeystoreEditData(null);
@@ -1506,6 +1513,14 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
                   >
                     <Plus size={16} /> Create Keystore
                   </button>
+                  {isGatewayEnvironmentsPage && (
+                    <button
+                      onClick={() => navigate('/gateway/environments/keystore/sync')}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"
+                    >
+                      <RefreshCw size={16} /> Sync
+                    </button>
+                  )}
                 </div>
               </div>
 

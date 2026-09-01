@@ -15,9 +15,10 @@ import {
   stageMotion,
 } from './shared';
 
-export default function SourceStep({ profile, org, env, resourceTypes, onResourceTypesChange, setParams, onDiscover, discovering }) {
+export default function SourceStep({ profile, org, env, resourceTypes, onResourceTypesChange, resourceScope, setParams, onDiscover, discovering }) {
   const organizations = ORGANIZATIONS[profile] || [];
   const ready = Boolean(profile && org && env && resourceTypes.length);
+  const lockedGroup = resourceScope ? RESOURCE_GROUPS.find((group) => group.id === resourceScope) : null;
   const resourceTypeOptions = RESOURCE_GROUPS.map((group) => ({
     value: group.id,
     label: group.label,
@@ -64,14 +65,25 @@ export default function SourceStep({ profile, org, env, resourceTypes, onResourc
             />
           </Field>
           <div className="sm:col-span-2">
-            <Field label="Resource types" hint="Only selected types will be requested from ForgeSphere and shown in the Resources step.">
-              <MultiSelectDropdown
-                values={resourceTypes}
-                options={resourceTypeOptions}
-                placeholder="Select resource types"
-                onChange={onResourceTypesChange}
-              />
-            </Field>
+            {lockedGroup ? (
+              <Field label="Resource type" hint={lockedGroup.description}>
+                <SelectDropdown
+                  value={lockedGroup.id}
+                  options={[{ value: lockedGroup.id, label: lockedGroup.label, description: lockedGroup.scope }]}
+                  disabled
+                  onChange={() => {}}
+                />
+              </Field>
+            ) : (
+              <Field label="Resource types" hint="Only selected types will be requested from ForgeSphere and shown in the Resources step.">
+                <MultiSelectDropdown
+                  values={resourceTypes}
+                  options={resourceTypeOptions}
+                  placeholder="Select resource types"
+                  onChange={onResourceTypesChange}
+                />
+              </Field>
+            )}
           </div>
         </div>
 
@@ -89,7 +101,7 @@ export default function SourceStep({ profile, org, env, resourceTypes, onResourc
             <div className="flex items-center justify-between border-b border-dark-700 pb-3"><span>Connection</span><span className="font-medium text-gray-200">{profile ? 'Ready' : 'Not selected'}</span></div>
             <div className="flex items-center justify-between border-b border-dark-700 pb-3"><span>Organization</span><span className="max-w-[170px] truncate font-medium text-gray-200">{org || 'Not selected'}</span></div>
             <div className="flex items-center justify-between border-b border-dark-700 pb-3"><span>Environment</span><span className="font-medium uppercase text-gray-200">{env || '—'}</span></div>
-            <div className="flex items-center justify-between"><span>Resource types</span><span className="font-medium text-gray-200">{resourceTypes.length ? `${resourceTypes.length} selected` : 'Not selected'}</span></div>
+            <div className="flex items-center justify-between"><span>{lockedGroup ? 'Resource type' : 'Resource types'}</span><span className="font-medium text-gray-200">{lockedGroup ? lockedGroup.label : resourceTypes.length ? `${resourceTypes.length} selected` : 'Not selected'}</span></div>
           </div>
         </div>
       </div>

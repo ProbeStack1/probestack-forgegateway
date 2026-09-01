@@ -14,9 +14,10 @@ import {
   PREVIEW_ROUTE_DEFAULTS,
   STAGES,
   StepBar,
+  SYNC_SCOPES,
 } from './shared';
 
-export default function ProxyMigrationWizard() {
+export default function ProxyMigrationWizard({ resourceScope = 'api-proxies' }) {
   const navigate = useNavigate();
   const [params, setSearchParams] = useSearchParams();
   const [discovering, setDiscovering] = useState(false);
@@ -25,20 +26,27 @@ export default function ProxyMigrationWizard() {
   const stage = STAGES.some((item) => item.id === stageParam) ? stageParam : 'source';
   const view = params.get('view');
 
-  const profile = params.get('profile') || PREVIEW_ROUTE_DEFAULTS.profile;
-  const org = params.get('org') || PREVIEW_ROUTE_DEFAULTS.org;
-  const env = params.get('env') || PREVIEW_ROUTE_DEFAULTS.env;
+  const scopeConfig = SYNC_SCOPES[resourceScope] || SYNC_SCOPES['api-proxies'];
+  const routeDefaults = useMemo(() => ({
+    ...PREVIEW_ROUTE_DEFAULTS,
+    resourceTypes: resourceScope,
+    selected: scopeConfig.defaultSelected.join(','),
+  }), [resourceScope, scopeConfig]);
+
+  const profile = params.get('profile') || routeDefaults.profile;
+  const org = params.get('org') || routeDefaults.org;
+  const env = params.get('env') || routeDefaults.env;
   const search = params.get('q') || '';
   const resourceTypes = useMemo(() => {
     const routeValue = params.get('resourceTypes');
-    const value = routeValue === null ? PREVIEW_ROUTE_DEFAULTS.resourceTypes : routeValue;
+    const value = routeValue === null ? routeDefaults.resourceTypes : routeValue;
     return new Set(value.split(',').filter((id) => id && id !== 'none'));
-  }, [params]);
+  }, [params, routeDefaults]);
   const selected = useMemo(() => {
     const routeValue = params.get('selected');
-    const value = routeValue === null ? PREVIEW_ROUTE_DEFAULTS.selected : routeValue;
+    const value = routeValue === null ? routeDefaults.selected : routeValue;
     return new Set(value.split(',').filter((id) => id && id !== 'none'));
-  }, [params]);
+  }, [params, routeDefaults]);
   const scopedResources = useMemo(
     () => ALL_DISCOVERED_RESOURCES.filter((resource) => resourceTypes.has(resource.groupId)),
     [resourceTypes],
@@ -93,7 +101,7 @@ export default function ProxyMigrationWizard() {
     const next = new URLSearchParams(params);
     next.delete('view');
     next.set('stage', nextStage);
-    Object.entries(PREVIEW_ROUTE_DEFAULTS).forEach(([key, value]) => {
+    Object.entries(routeDefaults).forEach(([key, value]) => {
       if (!next.has(key)) next.set(key, value);
     });
     Object.entries(extra).forEach(([key, value]) => {
@@ -150,6 +158,7 @@ export default function ProxyMigrationWizard() {
             env={env}
             resourceTypes={[...resourceTypes]}
             onResourceTypesChange={setResourceTypes}
+            resourceScope={resourceScope}
             setParams={setParams}
             onDiscover={startDiscovery}
             discovering={discovering}
@@ -225,10 +234,10 @@ export default function ProxyMigrationWizard() {
         <header className="mb-4 -mt-4 flex h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-dark-700 bg-[#0e172a] px-1">
           <button
             type="button"
-            onClick={() => navigate('/gateway/proxy')}
+            onClick={() => navigate(scopeConfig.backPath)}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 transition hover:text-white"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to APIs
+            <ArrowLeft className="h-3.5 w-3.5" /> {scopeConfig.backLabel}
           </button>
           <div className="flex items-center gap-2">
             <button
@@ -243,7 +252,7 @@ export default function ProxyMigrationWizard() {
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10 text-blue-400">
                 <Layers3 className="h-4 w-4" />
               </span>
-              <span className="text-sm font-bold text-white">ForgeSphere Resource Migration</span>
+              <span className="text-sm font-bold text-white">{scopeConfig.pageTitle}</span>
             </div>
           </div>
         </header>

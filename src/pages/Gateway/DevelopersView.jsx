@@ -1,8 +1,9 @@
 // src/components/Gateway/DevelopersView.jsx
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Eye, Edit, Trash2, Plus, Search, Loader2, AlertCircle,
-  User, Mail, Calendar, Briefcase, Shield, X, Key
+  User, Mail, Calendar, Briefcase, Shield, X, Key, RefreshCw
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent } from "../../components/ui/dialog";
@@ -81,6 +82,7 @@ const ModalHeader = ({ title, icon: Icon, onClose }) => (
 );
 
 export const DevelopersView = ({ showMessage }) => {
+  const navigate = useNavigate();
   const [developers, setDevelopers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -687,6 +689,12 @@ export const DevelopersView = ({ showMessage }) => {
               className="bg-[#1a1f2e] focus:outline-none border border-[#2a3550] rounded-lg pl-9 pr-4 py-2 text-sm w-64 text-white"
             />
           </div>
+          <Button
+            onClick={() => navigate('/gateway/developer/sync')}
+            className="bg-transparent border border-[#2a3550] hover:border-[#3a4a70] hover:bg-[#1a1f2e] text-[#c4cde0] hover:text-white whitespace-nowrap"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" /> Sync
+          </Button>
           <Button onClick={openCreateModal} className="bg-[#ff5b1f] hover:bg-[#ff6b36] text-white whitespace-nowrap">
             <Plus className="mr-2 h-4 w-4" /> Create
           </Button>

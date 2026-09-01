@@ -1,5 +1,6 @@
 // src/components/ApigeeAppsManager.jsx
 import { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Search,
   Plus,
@@ -20,7 +21,6 @@ import { apigeeApiFetch } from "../../services/apigeeApiService";
 import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
 import CreateAppModal from "../../pages/Apigee/components/App/CreateAppModal";
 import AppCredentialsModal from "../../pages/Apigee/components/App/AppCredentialsModal";
-import { AppSyncModal } from "../../components/SyncModal";
 import { TableSkeletonRows } from "../../components/ui/SkeletonLoader";
 import useApigeeDevelopers from "../../pages/Apigee/components/useApigeeDevelopers";
 import { GatewayContextSelector } from "./GatewayContextSelector";
@@ -43,6 +43,7 @@ export default function ApigeeAppsManager({
   selectedEnv: externalSelectedEnv,
   onEnvChange,
 }) {
+  const navigate = useNavigate();
   // ----- State -----
   const [apps, setApps] = useState([]);
   const [isFetchingApps, setIsFetchingApps] = useState(false);
@@ -56,7 +57,6 @@ export default function ApigeeAppsManager({
   const [appDetailsError, setAppDetailsError] = useState("");
   const [auditDetails, setAuditDetails] = useState(null);
   const [auditLoading, setAuditLoading] = useState(false);
-  const [isAppSyncModal, setIsAppSyncModal] = useState(false);
   const [toast, setToast] = useState({ message: "", type: "success" });
 
   // Products list for AppCredentialsModal
@@ -345,7 +345,7 @@ export default function ApigeeAppsManager({
 
       {/* Main Apps Table Section */}
       <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-5 space-y-4">
-        {/* Header with Title and Buttons */}
+        {/* Header with Title, Filters and Buttons */}
         <div className="flex justify-between items-center flex-wrap gap-3">
           <div>
             <h3 className="text-2xl font-bold text-white mb-1">Consumer Apps</h3>
@@ -353,22 +353,29 @@ export default function ApigeeAppsManager({
               Manage developer applications and credentials
             </p>
           </div>
-          {/* Search Box */}
-          <form
-            onSubmit={(e) => e.preventDefault()}
-            className="flex items-center border border-dark-700 rounded-lg overflow-hidden"
-          >
-            <input
-              placeholder="Search by name..."
-              value={appSearch}
-              onChange={(e) => setAppSearch(e.target.value)}
-              className="bg-dark-800 px-3 py-2 text-sm outline-none w-64"
-            />
-            <button type="submit" className="px-3 text-gray-400 hover:text-white">
-              <Search size={16} />
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Search Box */}
+            <form
+              onSubmit={(e) => e.preventDefault()}
+              className="flex items-center border border-dark-700 rounded-lg overflow-hidden"
+            >
+              <input
+                placeholder="Search by name..."
+                value={appSearch}
+                onChange={(e) => setAppSearch(e.target.value)}
+                className="bg-dark-800 px-3 py-2 text-sm outline-none w-64"
+              />
+              <button type="submit" className="px-3 text-gray-400 hover:text-white">
+                <Search size={16} />
+              </button>
+            </form>
+
+            <button
+              onClick={() => navigate('/gateway/consumer/sync')}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"
+            >
+              <RefreshCw size={16} /> Sync
             </button>
-          </form>
-          <div className="flex gap-3">
             <button
               onClick={() => {
                 setAppEditData(null);
@@ -378,48 +385,38 @@ export default function ApigeeAppsManager({
             >
               <Plus size={16} /> Create
             </button>
-            <button
-              onClick={() => setIsAppSyncModal(true)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"
-            >
-              <RefreshCw size={16} /> Sync
-            </button>
           </div>
         </div>
 
-        {/* Secondary Filters: GatewayContextSelector + Developer select + Search */}
-        <div className="flex justify-between items-center flex-wrap gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* GatewayContextSelector replaces the old projectId select */}
-            <GatewayContextSelector
-              selectedOrg={selectedOrg}
-              setSelectedOrg={handleOrgChange}
-              selectedBU={selectedBU}
-              setSelectedBU={handleBUChange}
-              selectedEnv={selectedEnv}
-              setSelectedEnv={handleEnvChange}
-              showEnv={false}
-            />
+        {/* Secondary Filters: GatewayContextSelector + Developer select */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* GatewayContextSelector replaces the old projectId select */}
+          <GatewayContextSelector
+            selectedOrg={selectedOrg}
+            setSelectedOrg={handleOrgChange}
+            selectedBU={selectedBU}
+            setSelectedBU={handleBUChange}
+            selectedEnv={selectedEnv}
+            setSelectedEnv={handleEnvChange}
+            showEnv={false}
+          />
 
-            {/* Developer selector (kept) */}
-            <select
-              value={developerEmail}
-              onChange={(e) => setDeveloperEmail(e.target.value)}
-              disabled={isFetchingDevelopers}
-              className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">
-                {isFetchingDevelopers ? "Loading developers..." : "Select Developer"}
+          {/* Developer selector (kept) */}
+          <select
+            value={developerEmail}
+            onChange={(e) => setDeveloperEmail(e.target.value)}
+            disabled={isFetchingDevelopers}
+            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="">
+              {isFetchingDevelopers ? "Loading developers..." : "Select Developer"}
+            </option>
+            {developers.map((dev) => (
+              <option key={dev} value={dev}>
+                {dev}
               </option>
-              {developers.map((dev) => (
-                <option key={dev} value={dev}>
-                  {dev}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          
+            ))}
+          </select>
         </div>
 
         {/* Apps Table */}
@@ -657,16 +654,6 @@ export default function ApigeeAppsManager({
           </div>
         </DialogContent>
       </Dialog>
-
-      {isAppSyncModal && (
-        <AppSyncModal
-          onClose={() => setIsAppSyncModal(false)}
-          defaultOrg={selectedOrg}
-          defaultDeveloperEmail={developerEmail}
-          onSynced={fetchApps}
-          onSuccess={(message) => setToast({ message, type: "success" })}
-        />
-      )}
 
       <ConfirmationDialog />
 

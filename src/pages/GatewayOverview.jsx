@@ -706,9 +706,10 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="onboarding/applications/:appId" element={<ApplicationDetail />} />
             <Route path="access-center" element={<AccessCenter />} />
             <Route path="proxy" element={<ProxiesView showMessage={showMessage} />} />
-            <Route path="proxy/sync" element={<ProxyMigrationWizard />} />
+            <Route path="proxy/sync" element={<ProxyMigrationWizard resourceScope="api-proxies" />} />
             <Route path="proxy/:proxyName" element={<ProxyDetailViewWrapper showMessage={showMessage} />} />
             <Route path="shared-flow" element={<SharedFlowsView showMessage={showMessage} />} />
+            <Route path="shared-flow/sync" element={<ProxyMigrationWizard resourceScope="shared-flows" />} />
             <Route path="shared-flow/:sfName" element={<SharedFlowDetailViewWrapper showMessage={showMessage} />} />
             <Route
               path="products"
@@ -722,6 +723,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                 />
               }
             />
+            <Route path="products/sync" element={<ProxyMigrationWizard resourceScope="api-products" />} />
             <Route
               path="consumer"
               element={
@@ -733,7 +735,9 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
                 />
               }
             />
+            <Route path="consumer/sync" element={<ProxyMigrationWizard resourceScope="developer-apps" />} />
             <Route path="developer" element={<DevelopersView showMessage={showMessage} />} />
+            <Route path="developer/sync" element={<ProxyMigrationWizard resourceScope="developers" />} />
             <Route path="api-metrics" element={<ProxyMonitoring showHeader={false} />} />
             <Route path="observability-error-codes" element={<ObservabilityErrorCodeAnalysis />} />
             <Route path="observability-latency" element={<ObservabilityLatencyAnalysis />} />
@@ -747,6 +751,9 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="framework" element={<Framework showHeader={false} />} />
             <Route path="automation" element={<Automation showHeader={false} />} />
             <Route path="environments" element={<ApigeeMainPage showHeader={false} />} />
+            <Route path="environments/target-server/sync" element={<ProxyMigrationWizard resourceScope="target-servers" />} />
+            <Route path="environments/kvm/sync" element={<ProxyMigrationWizard resourceScope="kvms" />} />
+            <Route path="environments/keystore/sync" element={<ProxyMigrationWizard resourceScope="tls-keystores" />} />
             <Route path="gateway-env" element={<GatewayEnvironmentsView showMessage={showMessage} />} />
             <Route path="cicd-automation" element={<CicdAutomationPage />} />
             <Route path="api-deploy" element={<APIDeploy showHeader={false} isGateway={true} />} />

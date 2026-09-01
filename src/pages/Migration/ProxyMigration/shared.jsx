@@ -48,6 +48,61 @@ export const PREVIEW_ROUTE_DEFAULTS = {
   visibility: 'PRIVATE',
 };
 
+// One sync wizard, scoped per entry point. API proxies and shared flows are
+// Apigee's two bundle-deployed (SCM + revision) resource types, so each gets
+// its own dedicated, locked-to-one-resource-type sync entry point rather than
+// exposing the full multi-type discovery picker every time.
+export const SYNC_SCOPES = {
+  'api-proxies': {
+    pageTitle: 'ForgeSphere API Sync',
+    backPath: '/gateway/proxy',
+    backLabel: 'Back to APIs',
+    defaultSelected: ['payments-api', 'customer-profile-api'],
+  },
+  'shared-flows': {
+    pageTitle: 'ForgeSphere Global Function Sync',
+    backPath: '/gateway/shared-flow',
+    backLabel: 'Back to Global Functions',
+    defaultSelected: ['sf-common-security', 'sf-telemetry'],
+  },
+  'api-products': {
+    pageTitle: 'ForgeSphere Product Sync',
+    backPath: '/gateway/products',
+    backLabel: 'Back to Products',
+    defaultSelected: ['product-payments-gold', 'product-retail-mobile'],
+  },
+  'developer-apps': {
+    pageTitle: 'ForgeSphere Consumer App Sync',
+    backPath: '/gateway/consumer',
+    backLabel: 'Back to Consumers',
+    defaultSelected: ['app-partner-portal'],
+  },
+  'developers': {
+    pageTitle: 'ForgeSphere Developer Sync',
+    backPath: '/gateway/developer',
+    backLabel: 'Back to Developers',
+    defaultSelected: ['developer-partner-team'],
+  },
+  'kvms': {
+    pageTitle: 'ForgeSphere Config Map Sync',
+    backPath: '/gateway/environments',
+    backLabel: 'Back to Config Maps',
+    defaultSelected: ['kvm-payment-routing'],
+  },
+  'target-servers': {
+    pageTitle: 'ForgeSphere Backend Service Sync',
+    backPath: '/gateway/environments',
+    backLabel: 'Back to Backend Services',
+    defaultSelected: ['target-payment-core', 'target-crm-backend'],
+  },
+  'tls-keystores': {
+    pageTitle: 'ForgeSphere Trust Store Sync',
+    backPath: '/gateway/environments',
+    backLabel: 'Back to Trust Stores',
+    defaultSelected: ['tls-outbound-mtls'],
+  },
+};
+
 const PROXY_RESOURCES = [
   { id: 'payments-api', name: 'payments-api', revision: '18', deployedAt: '27 Aug 2026, 10:42', status: 'missing' },
   { id: 'customer-profile-api', name: 'customer-profile-api', revision: '7', deployedAt: '26 Aug 2026, 18:15', status: 'missing' },

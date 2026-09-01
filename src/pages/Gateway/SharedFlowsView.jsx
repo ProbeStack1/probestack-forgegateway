@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import JSZip from "jszip";
-import { Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2, AlertCircle, Trash2Icon, FileCode2 } from "lucide-react";
+import { Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2, AlertCircle, Trash2Icon, FileCode2, RefreshCw } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { GatewayContextSelector } from "./GatewayContextSelector";
 import { fetchApigeeToken } from "../../services/apigeeToken";
@@ -183,17 +183,8 @@ export const SharedFlowsView = ({ showMessage }) => {
     return (
         <div className="flex flex-col gap-4 p-6">
             <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5 space-y-4">
-            <h2 className="text-2xl font-bold text-white mb-1">Global Functions</h2>
-            <div className="flex justify-between items-center">
-                <GatewayContextSelector
-                    selectedOrg={selectedOrg}
-                    setSelectedOrg={setSelectedOrg}
-                    selectedBU={selectedBU}
-                    setSelectedBU={setSelectedBU}
-                    selectedEnv={selectedEnv}
-                    setSelectedEnv={setSelectedEnv}
-                    showEnv
-                />
+            <div className="flex justify-between items-center flex-wrap gap-3">
+                <h2 className="text-2xl font-bold text-white mb-1">Global Functions</h2>
                 <div className="flex items-center gap-2">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#5a6a8a]" />
@@ -205,10 +196,28 @@ export const SharedFlowsView = ({ showMessage }) => {
                             className="bg-[#1a1f2e] border border-[#2a3550] rounded-lg pl-9 pr-4 py-2 text-sm w-50"
                         />
                     </div>
+                    <Button
+                        onClick={() => navigate('/gateway/shared-flow/sync')}
+                        className="bg-transparent border border-[#2a3550] hover:border-[#3a4a70] hover:bg-[#1a1f2e] text-[#c4cde0] hover:text-white"
+                    >
+                        <RefreshCw className="mr-1.5 h-4 w-4" /> Sync
+                    </Button>
                     <Button onClick={() => setCreateModalOpen({ open: true, name: "", description: "" })}>
                         <Plus className="mr-1 h-4 w-4" /> Create
                     </Button>
                 </div>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+                <GatewayContextSelector
+                    selectedOrg={selectedOrg}
+                    setSelectedOrg={setSelectedOrg}
+                    selectedBU={selectedBU}
+                    setSelectedBU={setSelectedBU}
+                    selectedEnv={selectedEnv}
+                    setSelectedEnv={setSelectedEnv}
+                    showEnv
+                />
             </div>
 
             {loadingSharedFlows ? (

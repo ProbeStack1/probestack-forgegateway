@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
     Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2,
-    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown
+    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown, RefreshCw
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
@@ -1529,6 +1529,13 @@ ${declaredResources.map((r, idx) => {
                             className="bg-[#1a1f2e] focus:outline-none border border-[#2a3550] rounded-lg pl-9 pr-4 py-2 text-sm w-64 text-white"
                         />
                     </div>
+                    <Button
+                        onClick={() => navigate('/gateway/proxy/sync')}
+                        className="bg-transparent border border-[#2a3550] hover:border-[#3a4a70] hover:bg-[#1a1f2e] text-[#c4cde0] hover:text-white whitespace-nowrap"
+                    >
+                        <RefreshCw className="h-4 w-4 mr-1.5" />
+                        Sync
+                    </Button>
                     <Button onClick={handleCreateClick} className="bg-[#ff5b1f] hover:bg-[#ff6b36] text-white whitespace-nowrap">
                         Create
                     </Button>

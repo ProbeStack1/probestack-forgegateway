@@ -46,6 +46,7 @@ import { fetchApigeeToken } from "../services/apigeeToken";
 import { OnboardingView } from "./Gateway/OnboardingView";
 import { ProxiesView } from "./Gateway/ProxiesView";
 import { SharedFlowsView } from "./Gateway/SharedFlowsView";
+import ProxyMigrationWizard from "./Migration/ProxyMigrationWizard.jsx";
 import APIProductsManager from "./Gateway/APIProductsManager";
 import ApigeeAppsManager from "./Gateway/ApigeeAppsManager";
 import ProxyMonitoring from "./ProxyMonitoring";
@@ -705,6 +706,7 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="onboarding/applications/:appId" element={<ApplicationDetail />} />
             <Route path="access-center" element={<AccessCenter />} />
             <Route path="proxy" element={<ProxiesView showMessage={showMessage} />} />
+            <Route path="proxy/sync" element={<ProxyMigrationWizard />} />
             <Route path="proxy/:proxyName" element={<ProxyDetailViewWrapper showMessage={showMessage} />} />
             <Route path="shared-flow" element={<SharedFlowsView showMessage={showMessage} />} />
             <Route path="shared-flow/:sfName" element={<SharedFlowDetailViewWrapper showMessage={showMessage} />} />

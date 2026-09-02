@@ -24,11 +24,8 @@ const Dialog = ({ open, onOpenChange, children, className }) => {
   return (
     <DialogContext.Provider value={{ open, onOpenChange }}>
       <div className={cn("fixed inset-0 z-50 flex items-center justify-center", className)}>
-        {/* Backdrop */}
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-          onClick={() => onOpenChange(false)}
-        />
+        {/* Backdrop (click-outside-to-close intentionally disabled) */}
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
         {/* Dialog Content */}
         <div className="relative z-50">{children}</div>
       </div>

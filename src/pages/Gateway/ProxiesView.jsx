@@ -24,6 +24,34 @@ import { POLICY_TYPE_TO_ELEMENT, MINIMAL_POLICY_XML, policyResourceFile, flatten
 const EXCLUDED_RECOMMENDED_FRAMEWORKS = ["API-Runtime-Framework-V1", "SF-AIGatewayFramework-V1"];
 const POLICY_LIBRARY_FLAT = flattenPolicyLibrary();
 
+// UI-only relabeling for the "FS Recommended" framework picker — the underlying shared
+// flow name (what's actually selected/extracted) never changes, only what's displayed.
+// Matched by keyword against the real name so it survives whatever exact name/versioning
+// the shared flow has in a given org; anything that doesn't match falls back to its raw name.
+const RECOMMENDED_FRAMEWORK_LABELS = [
+    { match: /cors/i, label: "Cors" },
+    { match: /exception/i, label: "Enterprise Exception" },
+    { match: /logg?ing/i, label: "Enterprise Logging" },
+    { match: /transformation/i, label: "Message Transformation" },
+    { match: /security/i, label: "Security Enforcement" },
+    { match: /traffic/i, label: "Traffic Management" },
+];
+const getRecommendedFrameworkLabel = (rawName) =>
+    RECOMMENDED_FRAMEWORK_LABELS.find(({ match }) => match.test(rawName))?.label || rawName;
+
+// Buckets POLICY_LIBRARY's underlying categories (unchanged in policyLibrary.js, and
+// still what Proxy Editor's own "Add Policy" picker groups by) into the three coarser
+// filter options this dialog's Policy picker offers — a display-only regrouping, not
+// a change to the shared catalog itself.
+const POLICY_CATEGORY_BUCKET = {
+    "AI / LLM": "AI Policy",
+    "MCP Gateway": "MCP Policy",
+    "Security": "API Policy",
+    "Mediation": "API Policy",
+};
+const getPolicyCategoryBucket = (rawCat) => POLICY_CATEGORY_BUCKET[rawCat] || "API Policy";
+const POLICY_CATEGORY_FILTERS = ["All", "AI Policy", "API Policy", "MCP Policy"];
+
 // Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
 // buried inside the fetch response's text body — surface the specific violation (e.g. which
 // proxy/revision owns a conflicting base path) instead of dumping the whole JSON blob at the user.
@@ -56,6 +84,65 @@ const DeployModeCard = ({ active, title, description, detail, onClick }) => (
     </button>
 );
 
+// Reusable "pick any number, then choose which Flow phase(s) each one runs in" list —
+// backs every Attach Frameworks multiselect (FS Recommended / Custom Framework /
+// Policy, for both the proxy and the backend service). Checking an item reveals its
+// own Request/Response checkboxes; both may be checked at once (the same step then
+// runs in both phases), but the caller's onTogglePhase refuses to leave neither
+// checked, since that step would compile away to nothing in the generated bundle.
+const PhaseMultiSelect = ({ items, selected, onToggle, onTogglePhase, getKey, getLabel, getIcon, emptyMessage }) => {
+    if (!items || items.length === 0) {
+        return <p className="mt-1 text-sm text-amber-400">{emptyMessage}</p>;
+    }
+    return (
+        <div className="mt-1 bg-[#0f1117] rounded-lg border border-[#2a3550] p-2 max-h-56 overflow-y-auto">
+            <div className="space-y-0.5">
+                {items.map((item) => {
+                    const key = getKey(item);
+                    const step = selected.find((s) => s.name === key);
+                    const Icon = getIcon ? getIcon(item) : null;
+                    return (
+                        <div key={key} className="flex items-center gap-3 rounded-md px-1.5 py-1.5 hover:bg-[#151a2b]">
+                            <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={!!step}
+                                    onChange={(e) => onToggle(key, e.target.checked)}
+                                    className="shrink-0 rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                />
+                                {Icon && <Icon className="h-4 w-4 text-slate-300 shrink-0" />}
+                                <span className="text-white text-sm truncate">{getLabel(item)}</span>
+                            </label>
+                            {step && (
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!step.request}
+                                            onChange={(e) => onTogglePhase(key, "request", e.target.checked)}
+                                            className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                        />
+                                        Request
+                                    </label>
+                                    <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={!!step.response}
+                                            onChange={(e) => onTogglePhase(key, "response", e.target.checked)}
+                                            className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                        />
+                                        Response
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
 export const ProxiesView = ({ showMessage }) => {
     const navigate = useNavigate();
     const location = useLocation();
@@ -67,12 +154,14 @@ export const ProxiesView = ({ showMessage }) => {
     const [proxiesError, setProxiesError] = useState(null);
     const [selectedOrg, setSelectedOrg] = useState("");
     const [selectedBU, setSelectedBU] = useState("");
+    const [selectedProject, setSelectedProject] = useState("");
     const [selectedEnv, setSelectedEnv] = useState("ALL");
     const [version, setVersion] = useState("");
 
-    // Environment / Project / Application selection — entirely local to the Create
-    // Proxy dialog. Deliberately independent of the page-level GatewayContextSelector
-    // (BU/Project/Env there are for filtering the list, not for driving what gets created).
+    // Environment / Project / Application selection for the Create Proxy dialog.
+    // Seeded from the page-level GatewayContextSelector when the dialog opens
+    // (see handleCreateClick), but editable independently from that point on —
+    // changing them here does not affect the page-level filters.
     const [createProxyEnv, setCreateProxyEnv] = useState("");
     const [createProxyProjects, setCreateProxyProjects] = useState([]);
     const [loadingCreateProxyProjects, setLoadingCreateProxyProjects] = useState(false);
@@ -110,14 +199,19 @@ export const ProxiesView = ({ showMessage }) => {
         targetUrl: "",
         zipFile: null,
         deploymentEnvs: [],
-        resources: [{ method: "GET", path: "" }],
-        // Attach Frameworks: "recommended" (curated framework shared flows) / "custom"
-        // (any global function) / "policy" (hand-picked policies) — mutually exclusive.
+        // policies: [{ name, phase }] — Apigee runs Steps in a Flow's Request/Response
+        // in the order listed, and there's no limit on how many can share a phase
+        // (e.g. VerifyAPIKey then Quota then SpikeArrest, all in Request), so a
+        // resource can attach any number of policies, each independently phased.
+        resources: [{ method: "GET", path: "", condition: "", policies: [] }],
+        // Attach Frameworks: "recommended" (curated framework shared flows, multi-select)
+        // / "custom" (any other global function, multi-select) / "policy" (hand-picked
+        // policies) — mutually exclusive modes, but each is a multi-select within itself.
         // frameworkAttachment resolves onto the ProxyEndpoint's PreFlow (client-facing
         // side); backendFrameworkAttachment resolves onto the TargetEndpoint's PreFlow
         // (backend-facing side) — same shape, different Apigee flow lane.
-        frameworkAttachment: { mode: "recommended", framework: "", policies: [] },
-        backendFrameworkAttachment: { mode: "recommended", framework: "", policies: [] },
+        frameworkAttachment: { mode: "recommended", frameworks: [], policies: [] },
+        backendFrameworkAttachment: { mode: "recommended", frameworks: [], policies: [] },
         apiType: "REST",
         openApiSpecFile: null,
         specParsed: false,
@@ -165,6 +259,13 @@ export const ProxiesView = ({ showMessage }) => {
     // Recommended/Custom Framework dropdowns.
     const [globalFunctions, setGlobalFunctions] = useState([]);
     const [loadingGlobalFunctions, setLoadingGlobalFunctions] = useState(false);
+    // Category filter ("All" / "AI Policy" / "API Policy" / "MCP Policy") for the
+    // Attach Frameworks > Policy picker's policy list — proxy and backend sides
+    // filter independently since either can be open to a different category.
+    const [proxyPolicyCategoryFilter, setProxyPolicyCategoryFilter] = useState("All");
+    const [backendPolicyCategoryFilter, setBackendPolicyCategoryFilter] = useState("All");
+    const getFilteredPolicyLibrary = (filter) =>
+        filter === "All" ? POLICY_LIBRARY_FLAT : POLICY_LIBRARY_FLAT.filter((p) => getPolicyCategoryBucket(p.cat) === filter);
 
     const fetchGlobalFunctions = async () => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
@@ -567,13 +668,20 @@ export const ProxiesView = ({ showMessage }) => {
         return () => { cancelled = true; };
     }, [createProxyModal.open]);
 
-    // Load Applications for the dialog's own selected Project
+    // Load Applications for the dialog's own selected Project — defaults to the
+    // first application returned (mirrors the Environment/Project defaulting
+    // above) since there's no page-level Application selector to seed from.
     useEffect(() => {
         if (!selectedCreateProxyProjectId) { setCreateProxyApplications([]); return; }
         let cancelled = false;
         setLoadingCreateProxyApplications(true);
         getApplications({ projectId: selectedCreateProxyProjectId, size: 100 })
-            .then((data) => { if (!cancelled) setCreateProxyApplications(data || []); })
+            .then((data) => {
+                if (cancelled) return;
+                const apps = data || [];
+                setCreateProxyApplications(apps);
+                setSelectedCreateProxyApplicationId((prev) => prev || apps[0]?.id || "");
+            })
             .catch((err) => {
                 console.error("Failed to load applications", err);
                 if (!cancelled) setCreateProxyApplications([]);
@@ -757,86 +865,98 @@ export const ProxiesView = ({ showMessage }) => {
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 
-    // Downloads a shared flow's (framework's) latest revision bundle and pulls its
-    // individual policy XML files back out, so a "Recommended"/"Custom Framework"
-    // selection results in real, editable policies attached to the new API — the
-    // same policies Proxy Editor's listPolicyNames() will show when reopened later.
-    // Also carries over anything under .../resources/ (e.g. the .js a Javascript
-    // policy's <ResourceURL> resolves to) so extracted policies stay deployable
-    // instead of referencing a resource that no longer exists in the new bundle.
-    const extractFrameworkPolicies = async (effectiveOrg, token, sfName) => {
-        const detailsRes = await fetch(
-            `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/${sfName}/details`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (!detailsRes.ok) throw new Error(`Failed to fetch details for framework "${sfName}"`);
-        const details = await detailsRes.json();
-        const latestRev = details?.sharedFlowDetails?.latestRevisionId;
-        if (!latestRev) throw new Error(`No revision found for framework "${sfName}"`);
-
-        const bundleRes = await fetch(
-            `https://apigee.googleapis.com/v1/organizations/${effectiveOrg}/sharedflows/${sfName}/revisions/${latestRev}/?format=bundle`,
-            { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (!bundleRes.ok) throw new Error(`Failed to fetch bundle for framework "${sfName}"`);
-        const bundleZip = await JSZip.loadAsync(await bundleRes.blob());
-
-        const policyFiles = Object.values(bundleZip.files).filter(
-            (f) => !f.dir && f.name.includes("/policies/") && f.name.endsWith(".xml")
-        );
-        const policies = [];
-        for (const f of policyFiles) {
-            const xml = await f.async("string");
-            const policyName = f.name.split("/").pop().replace(/\.xml$/, "");
-            policies.push({ name: policyName, xml });
-        }
-
-        const resourceEntries = Object.values(bundleZip.files).filter(
-            (f) => !f.dir && f.name.includes("/resources/")
-        );
-        const resourceFiles = [];
-        for (const f of resourceEntries) {
-            const relPath = f.name.slice(f.name.indexOf("/resources/") + 1); // "resources/jsc/Name.js"
-            const isText = /\.(js|py|xsl|xslt|json|xml|properties|wsdl)$/i.test(relPath);
-            const content = await f.async(isText ? "string" : "base64");
-            resourceFiles.push({ path: relPath, content, binary: !isText });
-        }
-
-        return { policies, resourceFiles };
+    // A "Recommended"/"Custom Framework" selection attaches via a FlowCallout, exactly
+    // like real Apigee proxies do — NOT by downloading the shared flow's bundle and
+    // copying its internal policies into the new proxy. FlowCallout stays live-linked
+    // to the shared flow bundle (picks up whatever's deployed there later) instead of
+    // freezing a stale copy, and it's what Apigee's own UI generates for this.
+    // Version suffixes are stripped from the policy name only — "API-Runtime-Framework-V1"
+    // becomes policy "FC-API-Runtime-Framework" while <SharedFlowBundle> keeps the full,
+    // exact bundle name so the reference still resolves correctly.
+    const buildFlowCalloutArtifact = (frameworkName) => {
+        const policyName = `FC-${frameworkName.replace(/-V\d+$/i, "")}`;
+        return {
+            name: policyName,
+            xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<FlowCallout continueOnError="false" enabled="true" name="${escapeXml(policyName)}">
+  <DisplayName>${escapeXml(policyName)}</DisplayName>
+  <Parameters/>
+  <SharedFlowBundle>${escapeXml(frameworkName)}</SharedFlowBundle>
+</FlowCallout>
+`,
+        };
     };
 
-    // Resolves the "Attach Frameworks" selection into { policies, resourceFiles } to
-    // bake into the generated bundle. "Policy" mode generates minimal policy definitions
-    // straight from the shared POLICY_LIBRARY catalog (plus a stub resource for any
-    // Javascript-backed ones); "Recommended"/"Custom Framework" mode extracts the real
-    // policies (and their resources) out of the selected framework.
-    const resolveAttachedPolicies = async (frameworkAttachment, effectiveOrg, token) => {
+    // Turns a POLICY_LIBRARY catalog name into a standalone policy definition (minimal
+    // XML + an optional stub resource file for Javascript-backed types). Shared by the
+    // "Attach Frameworks" > Policy mode below and by each Resource row's own single
+    // policy attachment, so both end up with an identically-shaped, valid policy.
+    const libraryPolicyToArtifact = (policyName) => {
+        if (!policyName) return null;
+        const item = POLICY_LIBRARY_FLAT.find((p) => p.name === policyName);
+        const actualType = item ? (POLICY_TYPE_TO_ELEMENT[item.typeKey] || item.typeKey) : "Policy";
+        return {
+            name: policyName,
+            xml: MINIMAL_POLICY_XML(actualType, policyName),
+            resourceFile: policyResourceFile(actualType, policyName),
+        };
+    };
+
+    // Resolves the "Attach Frameworks" selection into { policies, resourceFiles,
+    // requestSteps, responseSteps } to bake into the generated bundle. "Policy" mode
+    // generates minimal policy definitions straight from the shared POLICY_LIBRARY
+    // catalog (plus a stub resource for any Javascript-backed ones); "FS Recommended"/
+    // "Custom Framework" mode generates one FlowCallout policy per selected framework
+    // (see buildFlowCalloutArtifact above). Either way, each framework/policy's own
+    // Request/Response checkboxes decide which phase list(s) its Step lands in, so the
+    // same selection can run in Request, Response, or both.
+    const resolveAttachedPolicies = (frameworkAttachment) => {
         const mode = frameworkAttachment?.mode;
-        if (mode === "policy") {
-            const policies = [];
-            const resourceFiles = [];
-            (frameworkAttachment.policies || []).forEach((policyName) => {
-                const item = POLICY_LIBRARY_FLAT.find((p) => p.name === policyName);
-                const actualType = item ? (POLICY_TYPE_TO_ELEMENT[item.typeKey] || item.typeKey) : "Policy";
-                policies.push({ name: policyName, xml: MINIMAL_POLICY_XML(actualType, policyName) });
-                const resourceFile = policyResourceFile(actualType, policyName);
-                if (resourceFile) resourceFiles.push(resourceFile);
+        const policies = [];
+        const resourceFiles = [];
+        const requestSteps = [];
+        const responseSteps = [];
+
+        const mergePolicy = (name, xml) => {
+            if (!policies.some((p) => p.name === name)) policies.push({ name, xml });
+        };
+        const mergeResourceFile = (rf) => {
+            if (rf && !resourceFiles.some((existing) => existing.path === rf.path)) resourceFiles.push(rf);
+        };
+        const mergeSteps = (names, step) => {
+            names.forEach((n) => {
+                if (step.request && !requestSteps.includes(n)) requestSteps.push(n);
+                if (step.response && !responseSteps.includes(n)) responseSteps.push(n);
             });
-            return { policies, resourceFiles };
+        };
+
+        if (mode === "policy") {
+            (frameworkAttachment.policies || []).forEach((step) => {
+                const artifact = libraryPolicyToArtifact(step.name);
+                if (!artifact) return;
+                mergePolicy(artifact.name, artifact.xml);
+                mergeResourceFile(artifact.resourceFile);
+                mergeSteps([artifact.name], step);
+            });
+        } else if (mode === "recommended" || mode === "custom") {
+            (frameworkAttachment.frameworks || []).forEach((step) => {
+                const artifact = buildFlowCalloutArtifact(step.name);
+                mergePolicy(artifact.name, artifact.xml);
+                mergeSteps([artifact.name], step);
+            });
         }
-        if ((mode === "recommended" || mode === "custom") && frameworkAttachment.framework) {
-            return extractFrameworkPolicies(effectiveOrg, token, frameworkAttachment.framework);
-        }
-        return { policies: [], resourceFiles: [] };
+        return { policies, resourceFiles, requestSteps, responseSteps };
     };
 
     const generateProxyZip = async (template, {
         name, basePath, targetUrl, targetServer, resources = [],
         // Attached to the ProxyEndpoint's PreFlow — the client-facing side of the proxy.
-        attachedPolicies = [], attachedResourceFiles = [],
+        // requestSteps/responseSteps are policy names (already phase-filtered by
+        // resolveAttachedPolicies) — either or both may be non-empty per selection.
+        attachedPolicies = [], attachedResourceFiles = [], attachedRequestSteps = [], attachedResponseSteps = [],
         // Attached to the TargetEndpoint's PreFlow — the backend-facing side, evaluated
         // right before Apigee calls out to the actual backend service.
-        targetAttachedPolicies = [], targetAttachedResourceFiles = [],
+        targetAttachedPolicies = [], targetAttachedResourceFiles = [], targetAttachedRequestSteps = [], targetAttachedResponseSteps = [],
     }) => {
         const zip = new JSZip();
         const apiproxyFolder = zip.folder("apiproxy");
@@ -844,14 +964,43 @@ export const ProxiesView = ({ showMessage }) => {
         // De-dupe each lane by policy name in case a framework bundle repeats a name.
         const uniqueProxyPolicies = Array.from(new Map(attachedPolicies.map((p) => [p.name, p])).values());
         const uniqueTargetPolicies = Array.from(new Map(targetAttachedPolicies.map((p) => [p.name, p])).values());
-        const proxyPolicyNames = uniqueProxyPolicies.map((p) => p.name);
-        const targetPolicyNames = uniqueTargetPolicies.map((p) => p.name);
 
-        // apiproxy/policies/ is a single bundle-wide folder — merge both lanes into one
-        // manifest/file set (a name picked in both lanes only needs writing once).
+        // Request-phase steps go in PreFlow, response-phase steps go in PostFlow — the
+        // idiomatic split (e.g. FC-API-Runtime-Framework: PreFlow/Request +
+        // PostFlow/Response), not both crammed into PreFlow's own Response. Apigee runs
+        // response processing in reverse order (PostFlow → conditional Flow → PreFlow),
+        // so a PostFlow/Response step executes right after the backend responds
+        // (Target) / right before leaving this endpoint (Proxy) — not as the very last
+        // thing before the client, which is what a PreFlow/Response step would do.
+        const toSteps = (names) => names.map((n) => `<Step><Name>${escapeXml(n)}</Name></Step>`).join("");
+        const buildPreFlowXml = (requestSteps) =>
+            requestSteps.length === 0 ? "" : `<PreFlow name="PreFlow">
+    <Request>${toSteps(requestSteps)}</Request>
+    <Response/>
+  </PreFlow>`;
+        const buildPostFlowXml = (responseSteps) =>
+            responseSteps.length === 0 ? "" : `<PostFlow name="PostFlow">
+    <Request/>
+    <Response>${toSteps(responseSteps)}</Response>
+  </PostFlow>`;
+
+        // Declared Resources become conditional Flows (below). Each one may also attach
+        // any number of policies from the shared POLICY_LIBRARY catalog into that flow's
+        // own Request and/or Response — scoped to just that resource's condition, unlike
+        // the PreFlow-level "Attach Frameworks" policies above which run on every call.
+        const declaredResources = resources.filter((r) => r?.path && r.path.trim());
+        const resourcePolicyArtifacts = declaredResources
+            .flatMap((r) => r.policies || [])
+            .map((step) => libraryPolicyToArtifact(step.name))
+            .filter(Boolean);
+
+        // apiproxy/policies/ is a single bundle-wide folder — merge every lane (proxy
+        // PreFlow, target PreFlow, per-resource) into one manifest/file set; a name
+        // picked in more than one lane only needs declaring/writing once.
         const allPoliciesByName = new Map();
         uniqueProxyPolicies.forEach((p) => allPoliciesByName.set(p.name, p));
         uniqueTargetPolicies.forEach((p) => { if (!allPoliciesByName.has(p.name)) allPoliciesByName.set(p.name, p); });
+        resourcePolicyArtifacts.forEach((p) => { if (!allPoliciesByName.has(p.name)) allPoliciesByName.set(p.name, { name: p.name, xml: p.xml }); });
         const allPolicies = Array.from(allPoliciesByName.values());
         const policiesXml = allPolicies.length > 0
             ? `<Policies>${allPolicies.map((p) => `<Policy>${escapeXml(p.name)}</Policy>`).join("")}</Policies>`
@@ -872,10 +1021,13 @@ export const ProxiesView = ({ showMessage }) => {
         }
 
         // Resources (e.g. the .js a Javascript policy's <ResourceURL> resolves to)
-        // that attached/extracted policies depend on — merged across both lanes and
-        // de-duped by path.
+        // that attached/extracted/per-resource policies depend on — merged across
+        // every lane and de-duped by path.
         const allResourceFiles = Array.from(
-            new Map([...attachedResourceFiles, ...targetAttachedResourceFiles].map((r) => [r.path, r])).values()
+            new Map(
+                [...attachedResourceFiles, ...targetAttachedResourceFiles, ...resourcePolicyArtifacts.map((p) => p.resourceFile).filter(Boolean)]
+                    .map((r) => [r.path, r])
+            ).values()
         );
         allResourceFiles.forEach((r) => {
             apiproxyFolder.file(r.path, r.content, r.binary ? { base64: true } : undefined);
@@ -885,45 +1037,51 @@ export const ProxiesView = ({ showMessage }) => {
 
         // Declared Resources become conditional Flows so the proxy actually recognizes
         // each {method, path} pair (and so the Proxy Details view can read them straight
-        // back out of the deployed bundle, the same way it renders any other flow).
-        const declaredResources = resources.filter((r) => r?.path && r.path.trim());
+        // back out of the deployed bundle, the same way it renders any other flow). Each
+        // attached policy becomes its own <Step> inside that Flow's <Request> or
+        // <Response> — in the order they were added, same as Apigee runs them for real —
+        // so a resource can layer as many policies as it needs across either phase.
         const flowsXml = declaredResources.length > 0
             ? `<Flows>
 ${declaredResources.map((r, idx) => {
                 const method = escapeXml((r.method || "GET").toUpperCase());
                 const path = escapeXml(r.path.trim().startsWith("/") ? r.path.trim() : `/${r.path.trim()}`);
+                // The custom condition (if any) is ANDed onto the verb/path match rather
+                // than replacing it, so it narrows the flow (e.g. a header or query param
+                // check) instead of having to restate the routing logic.
+                const extraCondition = r.condition && r.condition.trim();
+                const condition = `(proxy.pathsuffix MatchesPath "${path}") and (request.verb = "${method}")`
+                    + (extraCondition ? ` and (${escapeXml(extraCondition.trim())})` : "");
+                const steps = r.policies || [];
+                const requestSteps = steps.filter((s) => s.request).map((s) => `<Step><Name>${escapeXml(s.name)}</Name></Step>`).join("");
+                const responseSteps = steps.filter((s) => s.response).map((s) => `<Step><Name>${escapeXml(s.name)}</Name></Step>`).join("");
+                const requestXml = requestSteps ? `\n      <Request>${requestSteps}</Request>` : "";
+                const responseXml = responseSteps ? `\n      <Response>${responseSteps}</Response>` : "";
                 return `    <Flow name="resource-${idx + 1}">
       <Description>${method} ${path}</Description>
-      <Condition>(proxy.pathsuffix MatchesPath "${path}") and (request.verb = "${method}")</Condition>
+      <Condition>${condition}</Condition>${requestXml}${responseXml}
     </Flow>`;
             }).join("\n")}
   </Flows>`
             : "";
 
-        const proxyPreFlowXml = proxyPolicyNames.length > 0
-            ? `<PreFlow name="PreFlow">
-    <Request>${proxyPolicyNames.map((n) => `<Step><Name>${escapeXml(n)}</Name></Step>`).join("")}</Request>
-    <Response/>
-  </PreFlow>`
-            : "";
+        const proxyPreFlowXml = buildPreFlowXml(attachedRequestSteps);
+        const proxyPostFlowXml = buildPostFlowXml(attachedResponseSteps);
 
         const proxyEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ProxyEndpoint name="default">
   <HTTPProxyConnection><BasePath>${basePath}</BasePath></HTTPProxyConnection>
   ${proxyPreFlowXml}
   ${flowsXml}
+  ${proxyPostFlowXml}
   <RouteRule name="default"/>
 </ProxyEndpoint>`;
         proxiesFolder.file("default.xml", proxyEndpointXml);
         if (template === "reverse") {
             const targetsFolder = apiproxyFolder.folder("targets");
 
-            const targetPreFlowXml = targetPolicyNames.length > 0
-                ? `<PreFlow name="PreFlow">
-    <Request>${targetPolicyNames.map((n) => `<Step><Name>${escapeXml(n)}</Name></Step>`).join("")}</Request>
-    <Response/>
-  </PreFlow>`
-                : "";
+            const targetPreFlowXml = buildPreFlowXml(targetAttachedRequestSteps);
+            const targetPostFlowXml = buildPostFlowXml(targetAttachedResponseSteps);
             const httpTargetConnectionXml = targetServer
                 ? `<HTTPTargetConnection>
     <LoadBalancer>
@@ -934,6 +1092,7 @@ ${declaredResources.map((r, idx) => {
             const targetEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <TargetEndpoint name="default">
   ${targetPreFlowXml}
+  ${targetPostFlowXml}
   ${httpTargetConnectionXml}
 </TargetEndpoint>`;
             targetsFolder.file("default.xml", targetEndpointXml);
@@ -1156,8 +1315,8 @@ ${declaredResources.map((r, idx) => {
             showMessage("Please upload a valid OpenAPI specification file first.", "error");
             return;
         }
-        if ((modal.frameworkAttachment.mode === "recommended" || modal.frameworkAttachment.mode === "custom") && !modal.frameworkAttachment.framework) {
-            showMessage("Please select a framework to attach to the proxy.", "error");
+        if ((modal.frameworkAttachment.mode === "recommended" || modal.frameworkAttachment.mode === "custom") && modal.frameworkAttachment.frameworks.length === 0) {
+            showMessage("Please select at least one framework to attach to the proxy.", "error");
             return;
         }
         if (modal.frameworkAttachment.mode === "policy" && modal.frameworkAttachment.policies.length === 0) {
@@ -1167,8 +1326,8 @@ ${declaredResources.map((r, idx) => {
         // Backend/target attachment only applies to templates that actually get a
         // TargetEndpoint in the generated bundle (see generateProxyZip's `template === "reverse"` gate).
         if (modal.template === "reverse") {
-            if ((modal.backendFrameworkAttachment.mode === "recommended" || modal.backendFrameworkAttachment.mode === "custom") && !modal.backendFrameworkAttachment.framework) {
-                showMessage("Please select a framework to attach to the backend service.", "error");
+            if ((modal.backendFrameworkAttachment.mode === "recommended" || modal.backendFrameworkAttachment.mode === "custom") && modal.backendFrameworkAttachment.frameworks.length === 0) {
+                showMessage("Please select at least one framework to attach to the backend service.", "error");
                 return;
             }
             if (modal.backendFrameworkAttachment.mode === "policy" && modal.backendFrameworkAttachment.policies.length === 0) {
@@ -1189,16 +1348,24 @@ ${declaredResources.map((r, idx) => {
             if (modal.template === "reverse" || modal.template === "no-target") {
                 let attachedPolicies = [];
                 let attachedResourceFiles = [];
+                let attachedRequestSteps = [];
+                let attachedResponseSteps = [];
                 let targetAttachedPolicies = [];
                 let targetAttachedResourceFiles = [];
+                let targetAttachedRequestSteps = [];
+                let targetAttachedResponseSteps = [];
                 try {
-                    const resolved = await resolveAttachedPolicies(modal.frameworkAttachment, effectiveOrg, token);
+                    const resolved = resolveAttachedPolicies(modal.frameworkAttachment);
                     attachedPolicies = resolved.policies;
                     attachedResourceFiles = resolved.resourceFiles;
+                    attachedRequestSteps = resolved.requestSteps;
+                    attachedResponseSteps = resolved.responseSteps;
                     if (modal.template === "reverse") {
-                        const targetResolved = await resolveAttachedPolicies(modal.backendFrameworkAttachment, effectiveOrg, token);
+                        const targetResolved = resolveAttachedPolicies(modal.backendFrameworkAttachment);
                         targetAttachedPolicies = targetResolved.policies;
                         targetAttachedResourceFiles = targetResolved.resourceFiles;
+                        targetAttachedRequestSteps = targetResolved.requestSteps;
+                        targetAttachedResponseSteps = targetResolved.responseSteps;
                     }
                 } catch (err) {
                     showMessage(`Failed to resolve attached framework: ${err.message}`, "error");
@@ -1212,8 +1379,12 @@ ${declaredResources.map((r, idx) => {
                     resources: modal.resources,
                     attachedPolicies,
                     attachedResourceFiles,
+                    attachedRequestSteps,
+                    attachedResponseSteps,
                     targetAttachedPolicies,
                     targetAttachedResourceFiles,
+                    targetAttachedRequestSteps,
+                    targetAttachedResponseSteps,
                 });
             } else if (modal.template === "upload") {
                 zipToUpload = modal.zipFile;
@@ -1362,6 +1533,8 @@ ${declaredResources.map((r, idx) => {
         setCreateProxyEnv("");
         setSelectedCreateProxyProjectId("");
         setSelectedCreateProxyApplicationId("");
+        setProxyPolicyCategoryFilter("All");
+        setBackendPolicyCategoryFilter("All");
     };
 
     const handleCreateClick = () => {
@@ -1381,9 +1554,71 @@ ${declaredResources.map((r, idx) => {
         setVersion("");
         setBackendOption("existing");
         setSelectedTargetServer("");
-        setCreateProxyEnv("");
-        setSelectedCreateProxyProjectId("");
+        setProxyPolicyCategoryFilter("All");
+        setBackendPolicyCategoryFilter("All");
+
+        // Seed Environment/Project from the page-level GatewayContextSelector; the
+        // user can still change either inside the dialog. When the page has "All
+        // Environments" (or nothing concrete) selected, default to "dev" rather
+        // than leaving the field blank.
+        const isConcreteEnv = selectedEnv && selectedEnv !== "ALL" && selectedEnv !== "NOT_DEPLOYED";
+        const defaultEnv = isConcreteEnv && availableCreateEnvs.includes(selectedEnv)
+            ? selectedEnv
+            : (availableCreateEnvs.find((env) => env.toLowerCase() === "dev") || "");
+        setCreateProxyEnv(defaultEnv);
+        setSelectedCreateProxyProjectId(selectedProject || "");
+        // Application depends on the project and is defaulted once its list loads
+        // (see the "Load Applications" effect below).
         setSelectedCreateProxyApplicationId("");
+    };
+
+    // Toggles one Request/Response checkbox for a policy step attached to a Resource.
+    // Both can be checked at once (the step is then added to both phases of the Flow);
+    // refuses to leave neither checked, since that step would compile away to nothing.
+    const updateResourcePolicyPhase = (resourceIdx, stepIdx, key, checked) => {
+        setCreateProxyModal(prev => ({
+            ...prev,
+            resources: prev.resources.map((r, i) => {
+                if (i !== resourceIdx) return r;
+                return {
+                    ...r,
+                    policies: r.policies.map((s, si) => {
+                        if (si !== stepIdx) return s;
+                        const next = { ...s, [key]: checked };
+                        return next.request || next.response ? next : s;
+                    }),
+                };
+            }),
+        }));
+    };
+
+    // Adds/removes an item from frameworkAttachment/backendFrameworkAttachment's
+    // "frameworks" or "policies" list — shared by every Attach Frameworks multiselect
+    // (attachmentKey picks proxy vs backend, listKey picks which array). A newly added
+    // item defaults to Request-only, same default as a Resource's policy step.
+    const toggleAttachmentItem = (attachmentKey, listKey, itemName, checked) => {
+        setCreateProxyModal(prev => {
+            const attachment = prev[attachmentKey];
+            const current = attachment[listKey];
+            const list = checked
+                ? [...current, { name: itemName, request: true, response: false }]
+                : current.filter((s) => s.name !== itemName);
+            return { ...prev, [attachmentKey]: { ...attachment, [listKey]: list } };
+        });
+    };
+
+    // Toggles one Request/Response checkbox for an already-selected framework/policy —
+    // same "never leave neither checked" guard as updateResourcePolicyPhase above.
+    const toggleAttachmentPhase = (attachmentKey, listKey, itemName, phaseKey, checked) => {
+        setCreateProxyModal(prev => {
+            const attachment = prev[attachmentKey];
+            const list = attachment[listKey].map((s) => {
+                if (s.name !== itemName) return s;
+                const next = { ...s, [phaseKey]: checked };
+                return next.request || next.response ? next : s;
+            });
+            return { ...prev, [attachmentKey]: { ...attachment, [listKey]: list } };
+        });
     };
 
     const checkProxyExists = async (proxyName) => {
@@ -1494,6 +1729,8 @@ ${declaredResources.map((r, idx) => {
                     setSelectedOrg={setSelectedOrg}
                     selectedBU={selectedBU}
                     setSelectedBU={setSelectedBU}
+                    selectedProject={selectedProject}
+                    setSelectedProject={setSelectedProject}
                     selectedEnv={selectedEnv}
                     setSelectedEnv={setSelectedEnv}
                     showEnv={true}
@@ -1718,8 +1955,10 @@ ${declaredResources.map((r, idx) => {
                                 ))}
                             </div>
                         </div>
-                        {/* Environment, Project & Application — all self-contained in this dialog,
-                            independent of whatever the page-level filters happen to be set to */}
+                        {/* Environment & Project default from the page-level GatewayContextSelector
+                            (Environment falls back to "dev" if the page has "All Environments"
+                            selected) and Application defaults to the first one found for that
+                            Project — all three remain freely editable here. */}
                         <div className="grid grid-cols-3 gap-3">
                             <div>
                                 <label className="text-sm font-medium text-white">
@@ -1929,67 +2168,160 @@ ${declaredResources.map((r, idx) => {
                                                 className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
                                             />
                                         </div>
-                                        {/* Resources (Method + Endpoint pairs) */}
+                                        {/* Resources: each one is a Verb + Path (+ optional Condition) that
+                                            becomes its own conditional Flow, and may attach any number of
+                                            policies from the library into that Flow's Request/Response. */}
                                         <div>
-                                            <div className="flex items-center justify-between">
-                                                <label className="text-sm font-medium text-white">Resources ({createProxyModal.resources.length})</label>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setCreateProxyModal(prev => ({
-                                                        ...prev,
-                                                        resources: [...prev.resources, { method: "GET", path: "" }],
-                                                    }))}
-                                                    className="flex items-center gap-1 text-xs font-medium text-[#ff8a5c] hover:text-[#ff5b1f]"
-                                                >
-                                                    <Plus className="h-3.5 w-3.5" /> Add
-                                                </button>
-                                            </div>
-                                            <div className="mt-2 space-y-2">
-                                                {createProxyModal.resources.map((resource, idx) => (
-                                                    <div key={idx} className="grid grid-cols-[120px_1fr_auto] gap-2 items-center">
-                                                        <select
-                                                            value={resource.method}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                resources: prev.resources.map((r, i) => i === idx ? { ...r, method: e.target.value } : r),
-                                                            }))}
-                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            {["GET", "POST", "PUT", "DELETE", "PATCH"].map((m) => (
-                                                                <option key={m} value={m}>{m}</option>
-                                                            ))}
-                                                        </select>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="/resource-path"
-                                                            value={resource.path}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                resources: prev.resources.map((r, i) => i === idx ? { ...r, path: e.target.value } : r),
-                                                            }))}
-                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        />
+                                            {(() => {
+                                                const lastResource = createProxyModal.resources[createProxyModal.resources.length - 1];
+                                                const canAddResource = !!lastResource?.path?.trim();
+                                                return (
+                                                    <div className="flex items-center justify-between">
+                                                        <div>
+                                                            <label className="text-sm font-medium text-white">Resources ({createProxyModal.resources.length})</label>
+                                                            <p className="text-xs text-slate-500">Verb + Path route the flow; attach any number of policies (optional), each independently to its Request or Response.</p>
+                                                        </div>
                                                         <button
                                                             type="button"
-                                                            onClick={() => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                resources: prev.resources.filter((_, i) => i !== idx),
-                                                            }))}
-                                                            disabled={createProxyModal.resources.length <= 1}
-                                                            className="p-2 text-slate-400 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
-                                                            title="Remove"
+                                                            onClick={() => {
+                                                                if (!canAddResource) return;
+                                                                setCreateProxyModal(prev => ({
+                                                                    ...prev,
+                                                                    resources: [...prev.resources, { method: "GET", path: "", condition: "", policies: [] }],
+                                                                }));
+                                                            }}
+                                                            disabled={!canAddResource}
+                                                            title={canAddResource ? "Add another resource" : "Enter a Path for the row above before adding another"}
+                                                            className="flex items-center gap-1 text-xs font-medium text-[#ff8a5c] hover:text-[#ff5b1f] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[#ff8a5c] shrink-0"
                                                         >
-                                                            <X className="h-4 w-4" />
+                                                            <Plus className="h-3.5 w-3.5" /> Add
                                                         </button>
+                                                    </div>
+                                                );
+                                            })()}
+                                            <div className="mt-2 space-y-2">
+                                                {createProxyModal.resources.map((resource, idx) => (
+                                                    <div key={idx} className="rounded-lg border border-[#2a3550] bg-[#0f1117]/40 p-3 space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <select
+                                                                value={resource.method}
+                                                                onChange={(e) => setCreateProxyModal(prev => ({
+                                                                    ...prev,
+                                                                    resources: prev.resources.map((r, i) => i === idx ? { ...r, method: e.target.value } : r),
+                                                                }))}
+                                                                className="w-[110px] shrink-0 rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                            >
+                                                                {["GET", "POST", "PUT", "DELETE", "PATCH"].map((m) => (
+                                                                    <option key={m} value={m}>{m}</option>
+                                                                ))}
+                                                            </select>
+                                                            <input
+                                                                type="text"
+                                                                placeholder="/resource-path"
+                                                                value={resource.path}
+                                                                onChange={(e) => setCreateProxyModal(prev => ({
+                                                                    ...prev,
+                                                                    resources: prev.resources.map((r, i) => i === idx ? { ...r, path: e.target.value } : r),
+                                                                }))}
+                                                                className="flex-1 rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCreateProxyModal(prev => ({
+                                                                    ...prev,
+                                                                    resources: prev.resources.filter((_, i) => i !== idx),
+                                                                }))}
+                                                                disabled={createProxyModal.resources.length <= 1}
+                                                                className="shrink-0 p-2 text-slate-400 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                                                                title="Remove"
+                                                            >
+                                                                <X className="h-4 w-4" />
+                                                            </button>
+                                                        </div>
+                                                        <input
+                                                            type="text"
+                                                            placeholder='Condition (optional) — e.g. request.header.x-api-version = "v2"'
+                                                            value={resource.condition || ""}
+                                                            onChange={(e) => setCreateProxyModal(prev => ({
+                                                                ...prev,
+                                                                resources: prev.resources.map((r, i) => i === idx ? { ...r, condition: e.target.value } : r),
+                                                            }))}
+                                                            className="w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
+                                                        />
+                                                        {/* Attached policy steps — Apigee runs any number of Steps per
+                                                            Request/Response in the order listed, so a resource can
+                                                            layer as many policies as it needs across either phase.
+                                                            Checking both boxes adds the same step to both phases. */}
+                                                        {(resource.policies || []).length > 0 && (
+                                                            <div className="space-y-1.5">
+                                                                {resource.policies.map((step, stepIdx) => (
+                                                                    <div key={`${step.name}-${stepIdx}`} className="flex items-center gap-3 rounded-lg border border-[#2a3550] bg-[#151a2b] pl-3 pr-1.5 py-1.5">
+                                                                        <span className="flex-1 min-w-0 truncate text-sm text-white" title={step.name}>{stepIdx + 1}. {step.name}</span>
+                                                                        <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer shrink-0">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={!!step.request}
+                                                                                onChange={(e) => updateResourcePolicyPhase(idx, stepIdx, "request", e.target.checked)}
+                                                                                className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                                            />
+                                                                            Request
+                                                                        </label>
+                                                                        <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer shrink-0">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={!!step.response}
+                                                                                onChange={(e) => updateResourcePolicyPhase(idx, stepIdx, "response", e.target.checked)}
+                                                                                className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                                            />
+                                                                            Response
+                                                                        </label>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setCreateProxyModal(prev => ({
+                                                                                ...prev,
+                                                                                resources: prev.resources.map((r, i) => i === idx
+                                                                                    ? { ...r, policies: r.policies.filter((_, si) => si !== stepIdx) }
+                                                                                    : r),
+                                                                            }))}
+                                                                            className="shrink-0 p-1 text-slate-400 hover:text-red-400"
+                                                                            title="Remove policy step"
+                                                                        >
+                                                                            <X className="h-3.5 w-3.5" />
+                                                                        </button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        <select
+                                                            value=""
+                                                            onChange={(e) => {
+                                                                const policyName = e.target.value;
+                                                                if (!policyName) return;
+                                                                setCreateProxyModal(prev => ({
+                                                                    ...prev,
+                                                                    resources: prev.resources.map((r, i) => i === idx
+                                                                        ? { ...r, policies: [...(r.policies || []), { name: policyName, request: true, response: false }] }
+                                                                        : r),
+                                                                }));
+                                                            }}
+                                                            className="w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            <option value="">+ Attach a policy…</option>
+                                                            {POLICY_LIBRARY_FLAT
+                                                                .filter((policy) => !(resource.policies || []).some((s) => s.name === policy.name))
+                                                                .map((policy) => (
+                                                                    <option key={policy.name} value={policy.name}>{policy.name} ({policy.cat})</option>
+                                                                ))}
+                                                        </select>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
                                         {/* Attach Frameworks — mutually exclusive source for how policies get
-                                            attached to this API: a curated recommended framework, any other
-                                            global function (shared flow), or a hand-picked set of policies.
-                                            Whatever resolves here is baked into the generated bundle as real
-                                            policy files, so Proxy Editor shows them when the API is reopened. */}
+                                            attached to this API: any number of curated "FS Recommended" frameworks,
+                                            any number of other global functions (shared flows), or a hand-picked
+                                            set of policies. Whatever resolves here is baked into the generated
+                                            bundle as real policy files, so Proxy Editor shows them when reopened. */}
                                         <div className="space-y-3">
                                             <label className="text-sm font-medium text-white">Attach Frameworks — Proxy</label>
                                             <div className="mt-2 flex flex-wrap gap-4">
@@ -2000,11 +2332,11 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.frameworkAttachment.mode === "recommended"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            frameworkAttachment: { mode: "recommended", framework: "", policies: [] },
+                                                            frameworkAttachment: { mode: "recommended", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">Recommended</span>
+                                                    <span className="text-white">FS Recommended</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
@@ -2013,7 +2345,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.frameworkAttachment.mode === "custom"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            frameworkAttachment: { mode: "custom", framework: "", policies: [] },
+                                                            frameworkAttachment: { mode: "custom", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -2026,7 +2358,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.frameworkAttachment.mode === "policy"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            frameworkAttachment: { mode: "policy", framework: "", policies: [] },
+                                                            frameworkAttachment: { mode: "policy", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -2035,77 +2367,59 @@ ${declaredResources.map((r, idx) => {
                                             </div>
 
                                             {createProxyModal.frameworkAttachment.mode === "recommended" && (
-                                                <div>
-                                                    {loadingGlobalFunctions ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
-                                                    ) : recommendedFrameworks.length === 0 ? (
-                                                        <p className="mt-1 text-sm text-amber-400">No recommended frameworks available.</p>
-                                                    ) : (
-                                                        <select
-                                                            value={createProxyModal.frameworkAttachment.framework}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                frameworkAttachment: { ...prev.frameworkAttachment, framework: e.target.value },
-                                                            }))}
-                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            <option value="">Select a recommended framework</option>
-                                                            {recommendedFrameworks.map((sf) => (
-                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-                                                </div>
+                                                loadingGlobalFunctions ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                ) : (
+                                                    <PhaseMultiSelect
+                                                        items={recommendedFrameworks}
+                                                        selected={createProxyModal.frameworkAttachment.frameworks}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("frameworkAttachment", "frameworks", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "frameworks", name, phaseKey, checked)}
+                                                        getKey={(sf) => sf.name}
+                                                        getLabel={(sf) => getRecommendedFrameworkLabel(sf.name)}
+                                                        emptyMessage="No recommended frameworks available."
+                                                    />
+                                                )
                                             )}
 
                                             {createProxyModal.frameworkAttachment.mode === "custom" && (
-                                                <div>
-                                                    {loadingGlobalFunctions ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
-                                                    ) : globalFunctions.length === 0 ? (
-                                                        <p className="mt-1 text-sm text-amber-400">No global functions available.</p>
-                                                    ) : (
-                                                        <select
-                                                            value={createProxyModal.frameworkAttachment.framework}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                frameworkAttachment: { ...prev.frameworkAttachment, framework: e.target.value },
-                                                            }))}
-                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            <option value="">Select a global function</option>
-                                                            {globalFunctions.map((sf) => (
-                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-                                                </div>
+                                                loadingGlobalFunctions ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                ) : (
+                                                    <PhaseMultiSelect
+                                                        items={globalFunctions}
+                                                        selected={createProxyModal.frameworkAttachment.frameworks}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("frameworkAttachment", "frameworks", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "frameworks", name, phaseKey, checked)}
+                                                        getKey={(sf) => sf.name}
+                                                        getLabel={(sf) => sf.name}
+                                                        emptyMessage="No global functions available."
+                                                    />
+                                                )
                                             )}
 
                                             {createProxyModal.frameworkAttachment.mode === "policy" && (
-                                                <div className="bg-[#0f1117] rounded-lg border border-[#2a3550] p-3 max-h-48 overflow-y-auto">
-                                                    <div className="space-y-2">
-                                                        {POLICY_LIBRARY_FLAT.map((policy) => (
-                                                            <label key={policy.name} className="flex items-center gap-2 cursor-pointer">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    value={policy.name}
-                                                                    checked={createProxyModal.frameworkAttachment.policies.includes(policy.name)}
-                                                                    onChange={(e) => setCreateProxyModal(prev => {
-                                                                        const current = prev.frameworkAttachment.policies;
-                                                                        const policies = e.target.checked
-                                                                            ? [...current, policy.name]
-                                                                            : current.filter((p) => p !== policy.name);
-                                                                        return { ...prev, frameworkAttachment: { ...prev.frameworkAttachment, policies } };
-                                                                    })}
-                                                                    className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
-                                                                />
-                                                                <policy.icon className="h-4 w-4 text-slate-300 shrink-0" />
-                                                                <span className="text-white text-sm">{policy.name}</span>
-                                                                <span className="text-xs text-slate-500">({policy.cat})</span>
-                                                            </label>
-                                                        ))}
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <label className="text-xs text-slate-400">Category</label>
+                                                        <select
+                                                            value={proxyPolicyCategoryFilter}
+                                                            onChange={(e) => setProxyPolicyCategoryFilter(e.target.value)}
+                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
+                                                        </select>
                                                     </div>
+                                                    <PhaseMultiSelect
+                                                        items={getFilteredPolicyLibrary(proxyPolicyCategoryFilter)}
+                                                        selected={createProxyModal.frameworkAttachment.policies}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("frameworkAttachment", "policies", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "policies", name, phaseKey, checked)}
+                                                        getKey={(p) => p.name}
+                                                        getLabel={(p) => p.name}
+                                                        getIcon={(p) => p.icon}
+                                                        emptyMessage="No policies in this category."
+                                                    />
                                                 </div>
                                             )}
                                         </div>
@@ -2196,11 +2510,11 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.backendFrameworkAttachment.mode === "recommended"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            backendFrameworkAttachment: { mode: "recommended", framework: "", policies: [] },
+                                                            backendFrameworkAttachment: { mode: "recommended", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
-                                                    <span className="text-white">Recommended</span>
+                                                    <span className="text-white">FS Recommended</span>
                                                 </label>
                                                 <label className="flex items-center gap-2">
                                                     <input
@@ -2209,7 +2523,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.backendFrameworkAttachment.mode === "custom"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            backendFrameworkAttachment: { mode: "custom", framework: "", policies: [] },
+                                                            backendFrameworkAttachment: { mode: "custom", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -2222,7 +2536,7 @@ ${declaredResources.map((r, idx) => {
                                                         checked={createProxyModal.backendFrameworkAttachment.mode === "policy"}
                                                         onChange={() => setCreateProxyModal(prev => ({
                                                             ...prev,
-                                                            backendFrameworkAttachment: { mode: "policy", framework: "", policies: [] },
+                                                            backendFrameworkAttachment: { mode: "policy", frameworks: [], policies: [] },
                                                         }))}
                                                         className="border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
@@ -2231,77 +2545,59 @@ ${declaredResources.map((r, idx) => {
                                             </div>
 
                                             {createProxyModal.backendFrameworkAttachment.mode === "recommended" && (
-                                                <div>
-                                                    {loadingGlobalFunctions ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
-                                                    ) : recommendedFrameworks.length === 0 ? (
-                                                        <p className="mt-1 text-sm text-amber-400">No recommended frameworks available.</p>
-                                                    ) : (
-                                                        <select
-                                                            value={createProxyModal.backendFrameworkAttachment.framework}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, framework: e.target.value },
-                                                            }))}
-                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            <option value="">Select a recommended framework</option>
-                                                            {recommendedFrameworks.map((sf) => (
-                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-                                                </div>
+                                                loadingGlobalFunctions ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                ) : (
+                                                    <PhaseMultiSelect
+                                                        items={recommendedFrameworks}
+                                                        selected={createProxyModal.backendFrameworkAttachment.frameworks}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("backendFrameworkAttachment", "frameworks", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "frameworks", name, phaseKey, checked)}
+                                                        getKey={(sf) => sf.name}
+                                                        getLabel={(sf) => getRecommendedFrameworkLabel(sf.name)}
+                                                        emptyMessage="No recommended frameworks available."
+                                                    />
+                                                )
                                             )}
 
                                             {createProxyModal.backendFrameworkAttachment.mode === "custom" && (
-                                                <div>
-                                                    {loadingGlobalFunctions ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
-                                                    ) : globalFunctions.length === 0 ? (
-                                                        <p className="mt-1 text-sm text-amber-400">No global functions available.</p>
-                                                    ) : (
-                                                        <select
-                                                            value={createProxyModal.backendFrameworkAttachment.framework}
-                                                            onChange={(e) => setCreateProxyModal(prev => ({
-                                                                ...prev,
-                                                                backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, framework: e.target.value },
-                                                            }))}
-                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            <option value="">Select a global function</option>
-                                                            {globalFunctions.map((sf) => (
-                                                                <option key={sf.name} value={sf.name}>{sf.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-                                                </div>
+                                                loadingGlobalFunctions ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin text-slate-400 mt-2" />
+                                                ) : (
+                                                    <PhaseMultiSelect
+                                                        items={globalFunctions}
+                                                        selected={createProxyModal.backendFrameworkAttachment.frameworks}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("backendFrameworkAttachment", "frameworks", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "frameworks", name, phaseKey, checked)}
+                                                        getKey={(sf) => sf.name}
+                                                        getLabel={(sf) => sf.name}
+                                                        emptyMessage="No global functions available."
+                                                    />
+                                                )
                                             )}
 
                                             {createProxyModal.backendFrameworkAttachment.mode === "policy" && (
-                                                <div className="bg-[#0f1117] rounded-lg border border-[#2a3550] p-3 max-h-48 overflow-y-auto">
-                                                    <div className="space-y-2">
-                                                        {POLICY_LIBRARY_FLAT.map((policy) => (
-                                                            <label key={policy.name} className="flex items-center gap-2 cursor-pointer">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    value={policy.name}
-                                                                    checked={createProxyModal.backendFrameworkAttachment.policies.includes(policy.name)}
-                                                                    onChange={(e) => setCreateProxyModal(prev => {
-                                                                        const current = prev.backendFrameworkAttachment.policies;
-                                                                        const policies = e.target.checked
-                                                                            ? [...current, policy.name]
-                                                                            : current.filter((p) => p !== policy.name);
-                                                                        return { ...prev, backendFrameworkAttachment: { ...prev.backendFrameworkAttachment, policies } };
-                                                                    })}
-                                                                    className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
-                                                                />
-                                                                <policy.icon className="h-4 w-4 text-slate-300 shrink-0" />
-                                                                <span className="text-white text-sm">{policy.name}</span>
-                                                                <span className="text-xs text-slate-500">({policy.cat})</span>
-                                                            </label>
-                                                        ))}
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <label className="text-xs text-slate-400">Category</label>
+                                                        <select
+                                                            value={backendPolicyCategoryFilter}
+                                                            onChange={(e) => setBackendPolicyCategoryFilter(e.target.value)}
+                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
+                                                        >
+                                                            {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
+                                                        </select>
                                                     </div>
+                                                    <PhaseMultiSelect
+                                                        items={getFilteredPolicyLibrary(backendPolicyCategoryFilter)}
+                                                        selected={createProxyModal.backendFrameworkAttachment.policies}
+                                                        onToggle={(name, checked) => toggleAttachmentItem("backendFrameworkAttachment", "policies", name, checked)}
+                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "policies", name, phaseKey, checked)}
+                                                        getKey={(p) => p.name}
+                                                        getLabel={(p) => p.name}
+                                                        getIcon={(p) => p.icon}
+                                                        emptyMessage="No policies in this category."
+                                                    />
                                                 </div>
                                             )}
                                         </div>

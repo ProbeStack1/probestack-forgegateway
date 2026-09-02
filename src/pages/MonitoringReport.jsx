@@ -255,12 +255,17 @@ export default function MonitoringReport() {
     }
   };
 
+  const metricsConfiguredCount = metrics.filter((m) => m.metric).length;
+  const dimensionsConfiguredCount = dimensions.filter((d) => d.value).length;
+  const filtersConfiguredCount = filters.filter((f) => f.name && f.operator && f.value).length;
+
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: '#0e172a' }}>
       <main className="flex-1 overflow-auto">
-        <div className="px-6 py-6">
+        <div className="mx-auto max-w-[1600px] flex flex-col gap-2 p-6">
+          <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5">
           {/* Header */}
-          <div className="flex items-center gap-3 pb-4 border-b border-dark-700/60 mb-6">
+          <div className="flex items-center gap-3 pb-4 border-b border-dark-700/60 mb-5">
             <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
               <BarChart2 className="w-5 h-5 text-primary" />
             </div>
@@ -270,312 +275,338 @@ export default function MonitoringReport() {
             </div>
           </div>
 
-          {/* Basics */}
-          <section className="mb-8">
-            <h2 className="text-lg font-semibold text-white mb-3">Basics</h2>
-            <div className="space-y-4">
-              <div>
-                <TextInput
-                  placeholder="Report name *"
-                  value={reportName}
-                  onChange={(e) => setReportName(e.target.value)}
-                />
-              </div>
-              <div>
-                <textarea
-                  placeholder="Report Description"
-                  value={reportDescription}
-                  onChange={(e) => setReportDescription(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 placeholder-gray-500 focus:outline-none focus:border-primary resize-y"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-[140px]">
-                  <FieldLabel>Environment</FieldLabel>
-                  <select
-                    value={environment}
-                    onChange={(e) => setEnvironment(e.target.value)}
-                    className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
-                  >
-                    <option value="dev">dev</option>
-                    <option value="staging">staging</option>
-                    <option value="prod">prod</option>
-                  </select>
-                  <ChevronDown className="absolute right-2 top-[34px] w-4 h-4 text-gray-500 pointer-events-none" />
-                </div>
-                <div className="relative min-w-[140px]">
-                  <FieldLabel>Time range</FieldLabel>
-                  <select
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value)}
-                    className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
-                  >
-                    {timeRangeOptions.map((r) => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-2 top-[34px] w-4 h-4 text-gray-500 pointer-events-none" />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Chart Type */}
-          <section className="mb-8">
-            <h2 className="text-lg font-semibold text-white mb-3">Chart Type</h2>
-            <div className="flex flex-col gap-2">
-              {[{ value: 'line', label: 'Line' }, { value: 'column', label: 'Column' }].map((opt) => (
-                <label key={opt.value} className="flex items-center gap-2.5 cursor-pointer">
-                  <span
-                    className={cn(
-                      'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2',
-                      chartType === opt.value ? 'border-primary' : 'border-dark-600',
-                    )}
-                  >
-                    {chartType === opt.value && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                  </span>
-                  <input
-                    type="radio"
-                    name="chartType"
-                    value={opt.value}
-                    checked={chartType === opt.value}
-                    onChange={() => setChartType(opt.value)}
-                    className="hidden"
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
+            {/* Main configuration column */}
+            <div className="xl:col-span-2 space-y-5">
+              {/* Basics */}
+              <Card className="bg-[#15192b] border-dark-700 p-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400 mb-3">Basics</h2>
+                <div className="space-y-3">
+                  <TextInput
+                    placeholder="Report name *"
+                    value={reportName}
+                    onChange={(e) => setReportName(e.target.value)}
                   />
-                  <span className="text-sm text-gray-300">{opt.label}</span>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          {/* Metrics */}
-          <section className="mb-8">
-            <div className="flex items-center gap-1.5 mb-3">
-              <h2 className="text-lg font-semibold text-white">Metrics</h2>
-              <HelpCircle className="w-4 h-4 text-gray-500" />
-            </div>
-
-            <div className="space-y-3">
-              {metrics.map((m, idx) => (
-                <Card key={m.id} className="bg-[#15192b] border-dark-700 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => updateMetric(m.id, { expanded: !m.expanded })}
-                      className="flex items-center gap-2 text-sm font-medium text-white"
-                    >
-                      {m.expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                      {m.metric || `New metric${idx > 0 ? ` ${idx + 1}` : ''}`}
-                    </button>
-                    <button onClick={() => removeMetric(m.id)} className="p-1 text-gray-500 hover:text-red-400">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {m.expanded && (
-                    <div className="px-4 pb-4 space-y-4">
-                      <div>
-                        <select
-                          value={m.metric}
-                          onChange={(e) => updateMetric(m.id, { metric: e.target.value })}
-                          className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
-                        >
-                          <option value="">Select a metric *</option>
-                          {metricOptions.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <p className="text-sm text-gray-300 mb-2">Aggregation function</p>
-                        <div className="flex flex-wrap gap-4">
-                          {['avg', 'max', 'min', 'sum'].map((key) => (
-                            <label key={key} className="flex items-center gap-2 cursor-pointer">
-                              <div
-                                className={cn(
-                                  'flex h-4 w-4 items-center justify-center rounded border',
-                                  m.agg[key] ? 'border-primary bg-primary' : 'border-dark-600 bg-dark-800/70',
-                                )}
-                              >
-                                {m.agg[key] && <Check className="w-3 h-3 text-white" />}
-                              </div>
-                              <input
-                                type="checkbox"
-                                checked={m.agg[key]}
-                                onChange={() => toggleMetricAgg(m.id, key)}
-                                className="hidden"
-                              />
-                              <span className="text-sm text-gray-300">{key}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end">
-                        <button
-                          onClick={() => updateMetric(m.id, { expanded: false })}
-                          className="text-sm font-medium text-primary hover:text-primary/80"
-                        >
-                          Done
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-
-            <button
-              onClick={addMetric}
-              className="mt-3 w-full rounded-md border border-dashed border-dark-600 py-2.5 text-sm text-gray-400 hover:border-primary/50 hover:text-primary transition-colors"
-            >
-              Add a metric
-            </button>
-          </section>
-
-          {/* Dimensions */}
-          <section className="mb-8">
-            <div className="flex items-center gap-1.5 mb-3">
-              <h2 className="text-lg font-semibold text-white">Dimensions</h2>
-              <HelpCircle className="w-4 h-4 text-gray-500" />
-            </div>
-
-            <div className="space-y-2">
-              {dimensions.map((d, idx) => (
-                <div key={d.id} className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <SearchableSelect
-                      value={d.value}
-                      onChange={(val) => updateDimension(d.id, val)}
-                      options={dimensionOptions}
-                      placeholder={`Dimension ${idx + 1} *`}
-                    />
-                  </div>
-                  <button
-                    onClick={() => moveDimension(d.id, -1)}
-                    disabled={idx === 0}
-                    className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-dark-800/70 disabled:opacity-30 disabled:hover:bg-transparent"
-                  >
-                    <ChevronUp className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => moveDimension(d.id, 1)}
-                    disabled={idx === dimensions.length - 1}
-                    className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-dark-800/70 disabled:opacity-30 disabled:hover:bg-transparent"
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => removeDimension(d.id)}
-                    className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-dark-800/70"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={addDimension}
-              className="mt-3 flex items-center gap-1.5 rounded-md border border-primary/40 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Plus className="w-4 h-4" /> Add a dimension
-            </button>
-          </section>
-
-          {/* Filter */}
-          <section className="mb-8">
-            <div className="flex items-center gap-1.5 mb-3">
-              <h2 className="text-lg font-semibold text-white">Filter</h2>
-              <HelpCircle className="w-4 h-4 text-gray-500" />
-            </div>
-
-            <div className="space-y-3">
-              {filters.map((f, idx) => (
-                <Card key={f.id} className="bg-[#15192b] border-dark-700 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => updateFilter(f.id, { expanded: !f.expanded })}
-                      className="flex items-center gap-2 text-sm font-medium text-white"
-                    >
-                      {f.expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-                      {f.name || `New filter${idx > 0 ? ` ${idx + 1}` : ''}`}
-                    </button>
-                    <button onClick={() => removeFilter(f.id)} className="p-1 text-gray-500 hover:text-red-400">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {f.expanded && (
-                    <div className="px-4 pb-4 space-y-4">
-                      <SearchableSelect
-                        value={f.name}
-                        onChange={(val) => updateFilter(f.id, { name: val })}
-                        options={dimensionOptions}
-                        placeholder="Select a name *"
-                      />
-
+                  <textarea
+                    placeholder="Report Description"
+                    value={reportDescription}
+                    onChange={(e) => setReportDescription(e.target.value)}
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 placeholder-gray-500 focus:outline-none focus:border-primary resize-y"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="relative">
+                      <FieldLabel>Environment</FieldLabel>
                       <select
-                        value={f.operator}
-                        onChange={(e) => updateFilter(f.id, { operator: e.target.value })}
+                        value={environment}
+                        onChange={(e) => setEnvironment(e.target.value)}
                         className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
                       >
-                        <option value="">Select an operator *</option>
-                        {operatorOptions.map((opt) => (
-                          <option key={opt} value={opt}>{opt}</option>
+                        <option value="dev">dev</option>
+                        <option value="staging">staging</option>
+                        <option value="prod">prod</option>
+                      </select>
+                      <ChevronDown className="absolute right-2 top-[34px] w-4 h-4 text-gray-500 pointer-events-none" />
+                    </div>
+                    <div className="relative">
+                      <FieldLabel>Time range</FieldLabel>
+                      <select
+                        value={timeRange}
+                        onChange={(e) => setTimeRange(e.target.value)}
+                        className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
+                      >
+                        {timeRangeOptions.map((r) => (
+                          <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
+                      <ChevronDown className="absolute right-2 top-[34px] w-4 h-4 text-gray-500 pointer-events-none" />
+                    </div>
+                  </div>
+                </div>
+              </Card>
 
-                      <TextInput
-                        placeholder="Value *"
-                        value={f.value}
-                        onChange={(e) => updateFilter(f.id, { value: e.target.value })}
-                      />
+              {/* Metrics */}
+              <Card className="bg-[#15192b] border-dark-700 p-4">
+                <div className="flex items-center gap-1.5 mb-3">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Metrics</h2>
+                  <HelpCircle className="w-3.5 h-3.5 text-gray-500" />
+                </div>
 
-                      <div className="flex justify-end">
+                <div className="space-y-2.5">
+                  {metrics.map((m, idx) => (
+                    <div key={m.id} className="rounded-lg border border-dark-700 bg-[#1a1f33]/60 overflow-hidden">
+                      <div className="flex items-center justify-between px-3.5 py-2.5">
                         <button
-                          onClick={() => updateFilter(f.id, { expanded: false })}
-                          className="text-sm font-medium text-primary hover:text-primary/80"
+                          type="button"
+                          onClick={() => updateMetric(m.id, { expanded: !m.expanded })}
+                          className="flex items-center gap-2 text-sm font-medium text-white"
                         >
-                          Done
+                          {m.expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                          {m.metric || `New metric${idx > 0 ? ` ${idx + 1}` : ''}`}
+                        </button>
+                        <button onClick={() => removeMetric(m.id)} className="p-1 text-gray-500 hover:text-red-400">
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
+
+                      {m.expanded && (
+                        <div className="px-3.5 pb-3.5 space-y-3 border-t border-dark-700/60 pt-3">
+                          <select
+                            value={m.metric}
+                            onChange={(e) => updateMetric(m.id, { metric: e.target.value })}
+                            className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
+                          >
+                            <option value="">Select a metric *</option>
+                            {metricOptions.map((opt) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+
+                          <div>
+                            <p className="text-xs text-gray-400 mb-2">Aggregation function</p>
+                            <div className="flex flex-wrap gap-3">
+                              {['avg', 'max', 'min', 'sum'].map((key) => (
+                                <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                                  <div
+                                    className={cn(
+                                      'flex h-4 w-4 items-center justify-center rounded border',
+                                      m.agg[key] ? 'border-primary bg-primary' : 'border-dark-600 bg-dark-800/70',
+                                    )}
+                                  >
+                                    {m.agg[key] && <Check className="w-3 h-3 text-white" />}
+                                  </div>
+                                  <input
+                                    type="checkbox"
+                                    checked={m.agg[key]}
+                                    onChange={() => toggleMetricAgg(m.id, key)}
+                                    className="hidden"
+                                  />
+                                  <span className="text-sm text-gray-300">{key}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => updateMetric(m.id, { expanded: false })}
+                              className="text-sm font-medium text-primary hover:text-primary/80"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
+                </div>
+
+                <button
+                  onClick={addMetric}
+                  className="mt-3 w-full rounded-md border border-dashed border-dark-600 py-2 text-sm text-gray-400 hover:border-primary/50 hover:text-primary transition-colors"
+                >
+                  Add a metric
+                </button>
+              </Card>
+
+              {/* Dimensions + Filter side by side on wide screens */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Dimensions */}
+                <Card className="bg-[#15192b] border-dark-700 p-4">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Dimensions</h2>
+                    <HelpCircle className="w-3.5 h-3.5 text-gray-500" />
+                  </div>
+
+                  <div className="space-y-2">
+                    {dimensions.map((d, idx) => (
+                      <div key={d.id} className="flex items-center gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <SearchableSelect
+                            value={d.value}
+                            onChange={(val) => updateDimension(d.id, val)}
+                            options={dimensionOptions}
+                            placeholder={`Dimension ${idx + 1} *`}
+                          />
+                        </div>
+                        <button
+                          onClick={() => moveDimension(d.id, -1)}
+                          disabled={idx === 0}
+                          className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-dark-800/70 disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <ChevronUp className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => moveDimension(d.id, 1)}
+                          disabled={idx === dimensions.length - 1}
+                          className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-dark-800/70 disabled:opacity-30 disabled:hover:bg-transparent"
+                        >
+                          <ChevronDown className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => removeDimension(d.id)}
+                          className="p-1.5 rounded text-gray-500 hover:text-red-400 hover:bg-dark-800/70"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={addDimension}
+                    className="mt-3 flex items-center gap-1.5 rounded-md border border-primary/40 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Add a dimension
+                  </button>
                 </Card>
-              ))}
+
+                {/* Filter */}
+                <Card className="bg-[#15192b] border-dark-700 p-4">
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">Filter</h2>
+                    <HelpCircle className="w-3.5 h-3.5 text-gray-500" />
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {filters.map((f, idx) => (
+                      <div key={f.id} className="rounded-lg border border-dark-700 bg-[#1a1f33]/60 overflow-hidden">
+                        <div className="flex items-center justify-between px-3.5 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => updateFilter(f.id, { expanded: !f.expanded })}
+                            className="flex items-center gap-2 text-sm font-medium text-white truncate"
+                          >
+                            {f.expanded ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
+                            <span className="truncate">{f.name || `New filter${idx > 0 ? ` ${idx + 1}` : ''}`}</span>
+                          </button>
+                          <button onClick={() => removeFilter(f.id)} className="p-1 text-gray-500 hover:text-red-400 shrink-0">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {f.expanded && (
+                          <div className="px-3.5 pb-3.5 space-y-3 border-t border-dark-700/60 pt-3">
+                            <SearchableSelect
+                              value={f.name}
+                              onChange={(val) => updateFilter(f.id, { name: val })}
+                              options={dimensionOptions}
+                              placeholder="Select a name *"
+                            />
+
+                            <select
+                              value={f.operator}
+                              onChange={(e) => updateFilter(f.id, { operator: e.target.value })}
+                              className="w-full h-10 pl-3 pr-8 text-sm rounded-md border border-dark-700 bg-[#1a1f33] text-gray-300 focus:outline-none focus:border-primary appearance-none cursor-pointer"
+                            >
+                              <option value="">Select an operator *</option>
+                              {operatorOptions.map((opt) => (
+                                <option key={opt} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+
+                            <TextInput
+                              placeholder="Value *"
+                              value={f.value}
+                              onChange={(e) => updateFilter(f.id, { value: e.target.value })}
+                            />
+
+                            <div className="flex justify-end">
+                              <button
+                                onClick={() => updateFilter(f.id, { expanded: false })}
+                                className="text-sm font-medium text-primary hover:text-primary/80"
+                              >
+                                Done
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {filters.length === 0 && (
+                      <p className="text-xs text-gray-500 py-1">No filters — the report will include all traffic.</p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={addFilter}
+                    className="mt-3 w-full rounded-md border border-dashed border-dark-600 py-2 text-sm text-gray-400 hover:border-primary/50 hover:text-primary transition-colors"
+                  >
+                    Add a filter
+                  </button>
+                </Card>
+              </div>
             </div>
 
-            <button
-              onClick={addFilter}
-              className="mt-3 w-full rounded-md border border-dashed border-dark-600 py-2.5 text-sm text-gray-400 hover:border-primary/50 hover:text-primary transition-colors"
-            >
-              Add a filter
-            </button>
-          </section>
+            {/* Sidebar: chart type + live summary + actions */}
+            <div className="space-y-5 xl:sticky xl:top-4">
+              <Card className="bg-[#15192b] border-dark-700 p-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400 mb-3">Chart Type</h2>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{ value: 'line', label: 'Line' }, { value: 'column', label: 'Column' }].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setChartType(opt.value)}
+                      className={cn(
+                        'flex items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-medium transition-colors',
+                        chartType === opt.value
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-dark-700 bg-[#1a1f33] text-gray-400 hover:text-gray-200 hover:border-dark-600',
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </Card>
 
-          {/* Actions */}
-          <div className="flex items-center gap-4 pt-2 pb-6">
-            <button
-              onClick={runReport}
-              disabled={!reportName || metrics.every((m) => !m.metric) || reportLoading}
-              className="flex items-center gap-2 px-5 py-2 rounded-md text-sm font-semibold bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:hover:bg-primary"
-            >
-              {reportLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-              Create
-            </button>
-            <button className="px-5 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white transition-colors">
-              Cancel
-            </button>
+              <Card className="bg-[#15192b] border-dark-700 p-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400 mb-3">Summary</h2>
+                <dl className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Environment</dt>
+                    <dd className="text-white font-medium">{environment}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Time range</dt>
+                    <dd className="text-white font-medium">{timeRange}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Metrics</dt>
+                    <dd className="text-white font-medium">{metricsConfiguredCount}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Dimensions</dt>
+                    <dd className="text-white font-medium">{dimensionsConfiguredCount}</dd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-gray-400">Filters</dt>
+                    <dd className="text-white font-medium">{filtersConfiguredCount}</dd>
+                  </div>
+                </dl>
+
+                <div className="flex items-center gap-3 mt-4 pt-4 border-t border-dark-700/60">
+                  <button
+                    onClick={runReport}
+                    disabled={!reportName || metrics.every((m) => !m.metric) || reportLoading}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-semibold bg-primary text-white hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:hover:bg-primary"
+                  >
+                    {reportLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Create
+                  </button>
+                  <button className="px-4 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              </Card>
+            </div>
           </div>
 
           {/* Results */}
           {(reportLoading || reportError || reportResult) && (
-            <section className="mb-10">
-              <h2 className="text-lg font-semibold text-white mb-3">Results</h2>
+            <section className="mt-5">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400 mb-3">Results</h2>
 
               {reportError && (
                 <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -624,6 +655,7 @@ export default function MonitoringReport() {
               )}
             </section>
           )}
+          </div>
         </div>
       </main>
     </div>

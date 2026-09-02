@@ -73,7 +73,8 @@ export default function LatencyAnalysis() {
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: '#0e172a' }}>
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-[1600px] px-6 py-6">
+        <div className="mx-auto max-w-[1600px] flex flex-col gap-2 p-6">
+          <div className="bg-dark-800/50 rounded-xl border border-dark-700 p-5">
           {/* Header */}
           <div className="flex items-center gap-3 pb-4 border-b border-dark-700/60 mb-4">
             <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
@@ -181,6 +182,7 @@ export default function LatencyAnalysis() {
             dimension={dimension}
             selectedMetrics={selectedMetrics}
           />
+          </div>
         </div>
       </main>
     </div>

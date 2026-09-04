@@ -46,6 +46,31 @@ import ResourceAuditDetails from './ResourceAuditDetails';
 import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import JSZip from "jszip";
 
+// Apigee's revision-detail response lists every policy in the bundle by name only —
+// no type info — so a FlowCallout that invokes an attached "FS Recommended"/"Custom
+// Framework" (see buildFlowCalloutArtifact in ProxiesView.jsx) is otherwise
+// indistinguishable from a real, individually-attached policy like VerifyAPIKey or
+// Quota. Those FlowCallout wrappers are always named "FC-<framework>" by convention,
+// so flag them here and render them as "Framework" chips instead of lumping the
+// framework's name in under "Policies" as if the user had picked it as one.
+const isFrameworkPolicy = (policyName) => /^FC-/.test(policyName || "");
+const frameworkNameFromPolicy = (policyName) => (policyName || "").replace(/^FC-/, "");
+
+// Shared chip renderer for every "Policies" list in this view (summary card, revision
+// table row, and the full-list modal) so the framework/policy distinction stays
+// consistent wherever policy names get rendered.
+const PolicyChip = ({ name, className = "" }) => {
+    const framework = isFrameworkPolicy(name);
+    return (
+        <span
+            className={`text-xs px-2 py-0.5 rounded-full ${framework ? "bg-[#4f8ef7]/15 text-[#4f8ef7] border border-[#4f8ef7]/30" : "bg-[#2a3550] text-slate-300"} ${className}`}
+            title={framework ? `Attached framework: ${frameworkNameFromPolicy(name)}` : name}
+        >
+            {framework ? `Framework: ${frameworkNameFromPolicy(name)}` : name}
+        </span>
+    );
+};
+
 // ── Bundle parsing: read the ProxyEndpoint / TargetEndpoint XML out of a revision's
 // zip bundle so we can show real flow/condition data Apigee's summarized revision
 // JSON doesn't include (basepaths/policies/target names only — no per-flow detail). ──
@@ -2571,7 +2596,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                     return (
                                                         <>
                                                             {policies.slice(0, 3).map((p, i) => (
-                                                                <span key={i} className="text-xs bg-[#2a3550] text-slate-300 px-2 py-0.5 rounded-full">{p}</span>
+                                                                <PolicyChip key={i} name={p} />
                                                             ))}
                                                             {policies.length > 3 && (
                                                                 <button
@@ -2968,9 +2993,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                                     {data?.policies?.length > 0 ? (
                                                                         <>
                                                                             {data.policies.slice(0, 3).map((p, i) => (
-                                                                                <span key={i} className="text-xs bg-[#2a3550] text-slate-300 px-1.5 py-0.5 rounded-full">
-                                                                                    {p}
-                                                                                </span>
+                                                                                <PolicyChip key={i} name={p} className="!px-1.5" />
                                                                             ))}
                                                                             {data.policies.length > 3 && (
                                                                                 <button
@@ -3079,7 +3102,9 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                         </div>
                                                     ) : (
                                                         <div className="grid gap-3">
-                                                            {filteredPolicies.map((policy, idx) => (
+                                                            {filteredPolicies.map((policy, idx) => {
+                                                                const framework = isFrameworkPolicy(policy);
+                                                                return (
                                                                 <div
                                                                     key={idx}
                                                                     className="group flex items-start gap-3 p-3 rounded-xl bg-[#1a1f2e]/50 border border-[#2a3550] hover:bg-[#1f2a3a] hover:border-[#ff5b1f]/30 transition-all duration-200"
@@ -3091,6 +3116,14 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                                         <code className="text-sm font-mono text-slate-200 break-all group-hover:text-white transition">
                                                                             {policy}
                                                                         </code>
+                                                                        {framework && (
+                                                                            <div className="mt-1 flex items-center gap-1.5">
+                                                                                <span className="text-[10px] uppercase tracking-wide bg-[#4f8ef7]/15 text-[#4f8ef7] border border-[#4f8ef7]/30 px-1.5 py-0.5 rounded-full">
+                                                                                    Framework
+                                                                                </span>
+                                                                                <span className="text-xs text-slate-400">{frameworkNameFromPolicy(policy)}</span>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                     <button
                                                                         onClick={() => navigator.clipboard.writeText(policy)}
@@ -3100,7 +3133,8 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                                                                         <Copy className="h-3.5 w-3.5" />
                                                                     </button>
                                                                 </div>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </div>
                                                     )}
                                                 </div>

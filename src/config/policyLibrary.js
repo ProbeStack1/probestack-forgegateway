@@ -91,6 +91,26 @@ export const POLICY_TYPE_TO_ELEMENT = {
 
 const JAVASCRIPT_STUB_SOURCE = '// Auto-generated placeholder — implement policy logic here.\n';
 
+// Some policy types are schema-invalid without specific required child elements —
+// Apigee's bundle-import validation rejects the whole bundle otherwise (e.g.
+// VerifyAPIKey without an <APIKey ref> fails import with "The APIKey element must
+// specify a ref attribute"). These are placeholder values the user is expected to
+// replace with real config via Proxy Editor once the API exists — just enough to
+// make the generated bundle importable, not to make the policy correct as-is.
+const REQUIRED_POLICY_BODY = {
+  VerifyAPIKey: () => `<APIKey ref="request.queryparam.apikey"/>`,
+  OAuthV2: () => `<Operation>VerifyAccessToken</Operation>`,
+  VerifyJWT: () => `<Algorithm>HS256</Algorithm>
+  <Source>request.header.Authorization</Source>
+  <SecretKey>
+    <Value ref="private.jwt-secret"/>
+  </SecretKey>`,
+  SpikeArrest: () => `<Rate>30ps</Rate>`,
+  Quota: () => `<Interval>1</Interval>
+  <TimeUnit>minute</TimeUnit>
+  <Allow count="100"/>`,
+};
+
 // A Javascript policy is schema-invalid without a <ResourceURL> pointing to a
 // real .js resource in the bundle, so its minimal XML — and a matching stub
 // resource file via policyResourceFile() below — must always be generated together.
@@ -104,9 +124,10 @@ export const MINIMAL_POLICY_XML = (type, name) => {
 </Javascript>
 `;
   }
+  const requiredBody = REQUIRED_POLICY_BODY[type]?.();
   return `<?xml version="1.0" encoding="UTF-8"?>
 <${type || 'Policy'} name="${name}">
-  <DisplayName>${name}</DisplayName>
+  <DisplayName>${name}</DisplayName>${requiredBody ? `\n  ${requiredBody}` : ''}
 </${type || 'Policy'}>
 `;
 };

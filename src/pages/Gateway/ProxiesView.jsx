@@ -16,6 +16,7 @@ import { PaginationControls } from "../../components/ui/PaginationControls";
 import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTargetServerModal";
 import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
+import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
 import { getProjects, getApplications } from "../../http-service/onboardingApi";
 import { POLICY_TYPE_TO_ELEMENT, MINIMAL_POLICY_XML, policyResourceFile, flattenPolicyLibrary } from "../../config/policyLibrary";
 
@@ -39,18 +40,153 @@ const RECOMMENDED_FRAMEWORK_LABELS = [
 const getRecommendedFrameworkLabel = (rawName) =>
     RECOMMENDED_FRAMEWORK_LABELS.find(({ match }) => match.test(rawName))?.label || rawName;
 
-// Buckets POLICY_LIBRARY's underlying categories (unchanged in policyLibrary.js, and
-// still what Proxy Editor's own "Add Policy" picker groups by) into the three coarser
-// filter options this dialog's Policy picker offers — a display-only regrouping, not
-// a change to the shared catalog itself.
-const POLICY_CATEGORY_BUCKET = {
-    "AI / LLM": "AI Policy",
-    "MCP Gateway": "MCP Policy",
-    "Security": "API Policy",
-    "Mediation": "API Policy",
+// Every distinct category actually present in POLICY_LIBRARY_FLAT, exactly as
+// policyLibrary.js and Proxy Editor's own "Add Policy" picker name them (AI / LLM,
+// MCP Gateway, Security, Mediation) — nothing hidden, and a category added to the
+// catalog later shows up here automatically.
+const POLICY_RAW_CATEGORIES = [...new Set(POLICY_LIBRARY_FLAT.map((p) => p.cat))];
+// "API Policy" is a combined umbrella over every category that isn't AI- or
+// MCP-specific (Security, Mediation, and anything else added later) — offered
+// alongside those raw categories, not instead of them, so both the broad grouping
+// and its finer-grained slices are selectable.
+const API_POLICY_CATEGORIES = POLICY_RAW_CATEGORIES.filter((c) => c !== "AI / LLM" && c !== "MCP Gateway");
+const POLICY_CATEGORY_FILTERS = ["All", "AI / LLM", "MCP Gateway", "API Policy", ...API_POLICY_CATEGORIES];
+
+// The Create API dialog's "Security & Traffic Configuration" section writes one Key
+// Value Map entry (per new API, keyed by its name) into an env-scoped KVM — the same
+// "Config Map" resource the Gateway Environments page manages. Five of its fields
+// (authEnabled/corsFlag/errorHandlingFlag/trafficManagementFlag/transformationFlag)
+// are DERIVED from whatever was already picked in "Attach Frameworks" above — not a
+// second, redundant set of toggles — so the KVM entry always matches what's actually
+// attached to the proxy/backend. Each "on" value is the identifying name of the
+// framework/policy that enforces it (so a runtime shared flow can both check
+// truthiness AND know which framework version to expect); "off" is always "".
+const KVM_FRAMEWORK_VALUES = {
+    authEnabled: "Security FM",
+    corsFlag: "CORS-Framework-V1",
+    errorHandlingFlag: "Exception",
+    trafficManagementFlag: "Traffic",
+    transformationFlag: "Message-Transformation",
 };
-const getPolicyCategoryBucket = (rawCat) => POLICY_CATEGORY_BUCKET[rawCat] || "API Policy";
-const POLICY_CATEGORY_FILTERS = ["All", "AI Policy", "API Policy", "MCP Policy"];
+// Keyword-matches a selected FS Recommended/Custom Framework's raw shared-flow name —
+// reuses the same keywords RECOMMENDED_FRAMEWORK_LABELS matches on, so "which friendly
+// label does this framework get" and "which KVM flag does it set" always agree.
+const FRAMEWORK_KVM_FLAG_MATCHERS = [
+    { match: /security/i, flag: "authEnabled" },
+    { match: /cors/i, flag: "corsFlag" },
+    { match: /exception/i, flag: "errorHandlingFlag" },
+    { match: /traffic/i, flag: "trafficManagementFlag" },
+    { match: /transformation/i, flag: "transformationFlag" },
+];
+// An individually-selected "Policy" mode pick that implies one of the KVM flags —
+// e.g. attaching VerifyAPIKey directly (without a Security Enforcement framework)
+// still means this API has API-key auth enabled.
+const POLICY_KVM_FLAG_MATCHERS = {
+    "VerifyAPIKey": { authEnabled: true, apikeyAuthFlag: true },
+    "OAuthV2": { authEnabled: true, oauthFlag: true },
+    "JWT Verify": { authEnabled: true, jwtFlag: true },
+    "SpikeArrest": { trafficManagementFlag: true },
+    "Quota": { trafficManagementFlag: true },
+    "AssignMessage": { transformationFlag: true },
+    "ExtractVariables": { transformationFlag: true },
+    "JSONToXML": { transformationFlag: true },
+    "JavaScript": { transformationFlag: true },
+    "ResponseCache": { transformationFlag: true },
+};
+// Scans both Attach Frameworks pickers (Proxy + Backend) and returns which KVM flags
+// are implied, plus a human-readable trail of what set each one (shown in the dialog
+// so it's never a mystery why a flag is on). Pure function of the two attachment
+// objects — safe to call both at render time (for the summary UI) and inside
+// createProxy() (for the actual payload), always agreeing with each other.
+const deriveSecurityKvmSignals = (proxyAttachment, backendAttachment) => {
+    const signals = {
+        authEnabled: false, corsFlag: false, errorHandlingFlag: false,
+        trafficManagementFlag: false, transformationFlag: false,
+        apikeyAuthFlag: false, oauthFlag: false, jwtFlag: false,
+        sources: [],
+    };
+    const apply = (flags, label, side) => {
+        Object.entries(flags).forEach(([flag, value]) => {
+            if (!value) return;
+            signals[flag] = true;
+            signals.sources.push({ flag, label, side });
+        });
+    };
+    [["Proxy", proxyAttachment], ["Backend", backendAttachment]].forEach(([side, attachment]) => {
+        if (!attachment) return;
+        if (attachment.mode === "recommended" || attachment.mode === "custom") {
+            (attachment.frameworks || []).forEach((step) => {
+                const matcher = FRAMEWORK_KVM_FLAG_MATCHERS.find((m) => m.match.test(step.name));
+                if (matcher) apply({ [matcher.flag]: true }, getRecommendedFrameworkLabel(step.name), side);
+            });
+        } else if (attachment.mode === "policy") {
+            (attachment.policies || []).forEach((step) => {
+                const flags = POLICY_KVM_FLAG_MATCHERS[step.name];
+                if (flags) apply(flags, step.name, side);
+            });
+        }
+    });
+    return signals;
+};
+
+const DEFAULT_KVM_NAME = "security-config";
+// The six non-API-Key mechanisms are mutually exclusive in the UI — one dropdown
+// picks which single one applies (or "None") — but each still writes its own
+// independent boolean into the KVM entry, matching the flat schema.
+const AUTH_MECHANISM_OPTIONS = [
+    { value: "", label: "None" },
+    { value: "oauthFlag", label: "OAuth" },
+    { value: "basicAuthFlag", label: "Basic Auth" },
+    { value: "jwtFlag", label: "JWT" },
+    { value: "hmacFlag", label: "HMAC" },
+    { value: "noAuthFlag", label: "No Auth" },
+    { value: "customAuthFlag", label: "Custom Auth" },
+];
+const defaultKvmConfig = {
+    enabled: false,
+    kvmName: DEFAULT_KVM_NAME,
+    // Auth-mechanism specifics and the spike arrest rate have no other source in the
+    // dialog, so they stay user-editable even though their gates (authEnabled,
+    // trafficManagementFlag) are derived rather than toggled here. Seeded from
+    // deriveSecurityKvmSignals() the moment "Create Key Value Map entry" is checked
+    // (see its onChange below) so a directly-selected VerifyAPIKey/OAuthV2/JWT
+    // Verify policy shows up pre-filled instead of silently ignored.
+    apikeyAuthFlag: false,
+    apikeyHeaderName: "",
+    authMechanism: "", // one of AUTH_MECHANISM_OPTIONS' values
+    spikearrestRate: "",
+};
+// Builds the actual JSON stored as the KVM entry's value. `signals` is this API's
+// derived state (see deriveSecurityKvmSignals); `cfg` holds only the sub-fields that
+// have no other source (auth mechanism specifics, spike arrest rate). Every child is
+// re-gated on its parent here rather than trusting stale UI state, so a concern that
+// isn't actually attached never leaks a lingering sub-value into the payload.
+// spikearrestEnabled has no toggle of its own — it's simply true whenever
+// trafficManagementFlag is, per spec ("If trafficManagementFlag=true then Set it
+// to true"); only its rate is ever user-entered.
+const buildSecurityKvmValue = (cfg, signals) => {
+    const authOn = signals.authEnabled;
+    const trafficOn = signals.trafficManagementFlag;
+    const apikeyOn = authOn && !!cfg.apikeyAuthFlag;
+    const mechanismOn = (key) => authOn && cfg.authMechanism === key;
+    return {
+        authEnabled: authOn ? KVM_FRAMEWORK_VALUES.authEnabled : "",
+        apikeyAuthFlag: apikeyOn,
+        apikeyHeaderName: apikeyOn ? (cfg.apikeyHeaderName || "").trim() : "",
+        oauthFlag: mechanismOn("oauthFlag"),
+        basicAuthFlag: mechanismOn("basicAuthFlag"),
+        jwtFlag: mechanismOn("jwtFlag"),
+        hmacFlag: mechanismOn("hmacFlag"),
+        noAuthFlag: mechanismOn("noAuthFlag"),
+        customAuthFlag: mechanismOn("customAuthFlag"),
+        corsFlag: signals.corsFlag ? KVM_FRAMEWORK_VALUES.corsFlag : "",
+        errorHandlingFlag: signals.errorHandlingFlag ? KVM_FRAMEWORK_VALUES.errorHandlingFlag : "",
+        trafficManagementFlag: trafficOn ? KVM_FRAMEWORK_VALUES.trafficManagementFlag : "",
+        transformationFlag: signals.transformationFlag ? KVM_FRAMEWORK_VALUES.transformationFlag : "",
+        spikearrestEnabled: trafficOn,
+        spikearrestRate: trafficOn ? (cfg.spikearrestRate || "").trim() : "",
+    };
+};
 
 // Apigee error responses are a JSON envelope ({ error: { message, details: [{ violations }] } })
 // buried inside the fetch response's text body — surface the specific violation (e.g. which
@@ -249,6 +385,15 @@ export const ProxiesView = ({ showMessage }) => {
         accessType: "private", autoApprove: false,
     });
 
+    // Security & Traffic Configuration — optionally writes a Key Value Map entry
+    // (named after the new API) into the dialog's own Environment, in the same
+    // env-scoped KVM ("Config Map") the Gateway Environments page manages. Most of
+    // its flags are derived from the Attach Frameworks selections above (see
+    // deriveSecurityKvmSignals) rather than tracked here — kvmConfig only holds what
+    // has no other source (the KVM name, auth mechanism specifics, spike arrest rate).
+    const [kvmConfig, setKvmConfig] = useState(defaultKvmConfig);
+    const kvmSignals = deriveSecurityKvmSignals(createProxyModal.frameworkAttachment, createProxyModal.backendFrameworkAttachment);
+
     // Existing target servers list & selected one
     const [targetServers, setTargetServers] = useState([]);
     const [selectedTargetServer, setSelectedTargetServer] = useState("");
@@ -259,13 +404,16 @@ export const ProxiesView = ({ showMessage }) => {
     // Recommended/Custom Framework dropdowns.
     const [globalFunctions, setGlobalFunctions] = useState([]);
     const [loadingGlobalFunctions, setLoadingGlobalFunctions] = useState(false);
-    // Category filter ("All" / "AI Policy" / "API Policy" / "MCP Policy") for the
-    // Attach Frameworks > Policy picker's policy list — proxy and backend sides
+    // Category filter (All / AI / LLM / MCP Gateway / API Policy / Security / Mediation)
+    // for the Attach Frameworks > Policy picker's policy list — proxy and backend sides
     // filter independently since either can be open to a different category.
     const [proxyPolicyCategoryFilter, setProxyPolicyCategoryFilter] = useState("All");
     const [backendPolicyCategoryFilter, setBackendPolicyCategoryFilter] = useState("All");
-    const getFilteredPolicyLibrary = (filter) =>
-        filter === "All" ? POLICY_LIBRARY_FLAT : POLICY_LIBRARY_FLAT.filter((p) => getPolicyCategoryBucket(p.cat) === filter);
+    const getFilteredPolicyLibrary = (filter) => {
+        if (filter === "All") return POLICY_LIBRARY_FLAT;
+        if (filter === "API Policy") return POLICY_LIBRARY_FLAT.filter((p) => API_POLICY_CATEGORIES.includes(p.cat));
+        return POLICY_LIBRARY_FLAT.filter((p) => p.cat === filter);
+    };
 
     const fetchGlobalFunctions = async () => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
@@ -771,6 +919,50 @@ export const ProxiesView = ({ showMessage }) => {
     useEffect(() => {
         fetchTargetServersForModal();
     }, [backendOption, selectedOrg, createProxyEnv, createProxyModal.open]);
+
+    // Creates the environment-scoped KVM ("Config Map") this API's Security & Traffic
+    // config entry will live in, if it doesn't already exist — the same KVM_ENV_LEVEL
+    // endpoint the Gateway Environments > Config Map tab uses, so a map created here
+    // shows up there and vice versa. A 409 from the create call (map already exists,
+    // e.g. a concurrent request beat this one to it) is not an error.
+    // `tracking` must be passed through getTrackingHeaders() — the wrapper backend's
+    // createKvm/createEntry/updateEntry routes run through executeTrackedMutation,
+    // which hard-requires x-onboarding-id and x-created-by (thrown as a 400
+    // "onboardingId is required..." otherwise); the GET check doesn't strictly need
+    // them but gets them anyway for consistent PLATFORM-vs-DIRECT_MANAGEMENT_API
+    // attribution in the backend's config registry.
+    const ensureKvmExists = async (org, env, kvmName, token, tracking) => {
+        const trackingHeaders = getTrackingHeaders(tracking);
+        const getRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.GET(org, env, kvmName), {
+            headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },
+        });
+        if (getRes.ok) return;
+        const createRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.CREATE(org, env), {
+            method: "POST",
+            headers: { ...trackingHeaders, Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ name: kvmName, encrypted: true }),
+        });
+        if (!createRes.ok && createRes.status !== 409) {
+            throw new Error(`Failed to create Key Value Map "${kvmName}": ${createRes.status} ${await createRes.text()}`);
+        }
+    };
+
+    // Creates the entry (falling back to an update if it already exists — e.g. an API
+    // name being reused after its prior entry was never cleaned up) holding this API's
+    // Security & Traffic config, keyed by the API's own name so a runtime shared flow
+    // can look it up via apiproxy.name. See ensureKvmExists above re: `tracking`.
+    const upsertKvmEntry = async (org, env, kvmName, entryName, entryValue, token, tracking) => {
+        const headers = { ...getTrackingHeaders(tracking), Authorization: `Bearer ${token}` };
+        const body = JSON.stringify({ name: entryName, value: entryValue });
+        const createRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.CREATE(org, env, kvmName), { method: "POST", headers, body });
+        if (createRes.ok) return;
+        if (createRes.status === 409 || createRes.status === 400) {
+            const updateRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.UPDATE(org, env, kvmName, entryName), { method: "PUT", headers, body });
+            if (updateRes.ok) return;
+            throw new Error(`Failed to update Key Value Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
+        }
+        throw new Error(`Failed to create Key Value Map entry "${entryName}": ${createRes.status} ${await createRes.text()}`);
+    };
 
     // Filtering logic (unchanged)
     const filteredBySearchAndEnv = useMemo(() => {
@@ -1472,6 +1664,36 @@ ${declaredResources.map((r, idx) => {
                 }
             }
 
+            // Security & Traffic Configuration (optional) — writes this API's config as
+            // one KVM entry, keyed by its name, into the dialog's own Environment. Failure
+            // here doesn't roll back the already-created API; it's surfaced as a warning.
+            // Re-derived from `modal` (this function's own snapshot of the form) rather
+            // than trusting the render-time kvmSignals, so it can never drift from what
+            // was actually attached to the proxy/backend that just got created.
+            if (kvmConfig.enabled) {
+                const kvmName = kvmConfig.kvmName.trim() || DEFAULT_KVM_NAME;
+                // Same tracking identity as the config-audit call above — the wrapper
+                // backend requires it (see ensureKvmExists) to attribute/authorize the
+                // KVM writes, not just to log them.
+                const kvmTracking = {
+                    onboardingId: defaultOnboardingId || getFallbackOnboardingId(),
+                    microserviceId: defaultMicroserviceId,
+                    projectId: selectedCreateProxyProjectId,
+                    projectName: selectedCreateProxyProject?.name,
+                    applicationId: selectedCreateProxyApplication?.id,
+                    applicationName: selectedCreateProxyApplication?.name,
+                };
+                try {
+                    const signals = deriveSecurityKvmSignals(modal.frameworkAttachment, modal.backendFrameworkAttachment);
+                    await ensureKvmExists(effectiveOrg, createProxyEnv, kvmName, token, kvmTracking);
+                    await upsertKvmEntry(effectiveOrg, createProxyEnv, kvmName, modal.name, JSON.stringify(buildSecurityKvmValue(kvmConfig, signals)), token, kvmTracking);
+                    showMessage(`Key Value Map entry "${modal.name}" created in "${kvmName}".`, "success");
+                } catch (err) {
+                    console.error("Failed to create Key Value Map entry for new API", err);
+                    showMessage(`API created, but Key Value Map setup failed: ${err.message}`, "error");
+                }
+            }
+
             // Reset modal state
             closeCreateProxyModal();
 
@@ -1535,6 +1757,7 @@ ${declaredResources.map((r, idx) => {
         setSelectedCreateProxyApplicationId("");
         setProxyPolicyCategoryFilter("All");
         setBackendPolicyCategoryFilter("All");
+        setKvmConfig(defaultKvmConfig);
     };
 
     const handleCreateClick = () => {
@@ -1556,6 +1779,7 @@ ${declaredResources.map((r, idx) => {
         setSelectedTargetServer("");
         setProxyPolicyCategoryFilter("All");
         setBackendPolicyCategoryFilter("All");
+        setKvmConfig(defaultKvmConfig);
 
         // Seed Environment/Project from the page-level GatewayContextSelector; the
         // user can still change either inside the dialog. When the page has "All
@@ -2364,6 +2588,16 @@ ${declaredResources.map((r, idx) => {
                                                     />
                                                     <span className="text-white">Policy</span>
                                                 </label>
+                                                {createProxyModal.frameworkAttachment.mode === "policy" && (
+                                                    <select
+                                                        value={proxyPolicyCategoryFilter}
+                                                        onChange={(e) => setProxyPolicyCategoryFilter(e.target.value)}
+                                                        title="Filter the policy list below by category"
+                                                        className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
+                                                    >
+                                                        {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
+                                                    </select>
+                                                )}
                                             </div>
 
                                             {createProxyModal.frameworkAttachment.mode === "recommended" && (
@@ -2399,28 +2633,16 @@ ${declaredResources.map((r, idx) => {
                                             )}
 
                                             {createProxyModal.frameworkAttachment.mode === "policy" && (
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <label className="text-xs text-slate-400">Category</label>
-                                                        <select
-                                                            value={proxyPolicyCategoryFilter}
-                                                            onChange={(e) => setProxyPolicyCategoryFilter(e.target.value)}
-                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    <PhaseMultiSelect
-                                                        items={getFilteredPolicyLibrary(proxyPolicyCategoryFilter)}
-                                                        selected={createProxyModal.frameworkAttachment.policies}
-                                                        onToggle={(name, checked) => toggleAttachmentItem("frameworkAttachment", "policies", name, checked)}
-                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "policies", name, phaseKey, checked)}
-                                                        getKey={(p) => p.name}
-                                                        getLabel={(p) => p.name}
-                                                        getIcon={(p) => p.icon}
-                                                        emptyMessage="No policies in this category."
-                                                    />
-                                                </div>
+                                                <PhaseMultiSelect
+                                                    items={getFilteredPolicyLibrary(proxyPolicyCategoryFilter)}
+                                                    selected={createProxyModal.frameworkAttachment.policies}
+                                                    onToggle={(name, checked) => toggleAttachmentItem("frameworkAttachment", "policies", name, checked)}
+                                                    onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "policies", name, phaseKey, checked)}
+                                                    getKey={(p) => p.name}
+                                                    getLabel={(p) => p.name}
+                                                    getIcon={(p) => p.icon}
+                                                    emptyMessage="No policies in this category."
+                                                />
                                             )}
                                         </div>
                                     </>
@@ -2542,6 +2764,16 @@ ${declaredResources.map((r, idx) => {
                                                     />
                                                     <span className="text-white">Policy</span>
                                                 </label>
+                                                {createProxyModal.backendFrameworkAttachment.mode === "policy" && (
+                                                    <select
+                                                        value={backendPolicyCategoryFilter}
+                                                        onChange={(e) => setBackendPolicyCategoryFilter(e.target.value)}
+                                                        title="Filter the policy list below by category"
+                                                        className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
+                                                    >
+                                                        {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
+                                                    </select>
+                                                )}
                                             </div>
 
                                             {createProxyModal.backendFrameworkAttachment.mode === "recommended" && (
@@ -2577,28 +2809,16 @@ ${declaredResources.map((r, idx) => {
                                             )}
 
                                             {createProxyModal.backendFrameworkAttachment.mode === "policy" && (
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <label className="text-xs text-slate-400">Category</label>
-                                                        <select
-                                                            value={backendPolicyCategoryFilter}
-                                                            onChange={(e) => setBackendPolicyCategoryFilter(e.target.value)}
-                                                            className="rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1 text-white text-xs focus:outline-none focus:border-[#ff5b1f]"
-                                                        >
-                                                            {POLICY_CATEGORY_FILTERS.map((f) => <option key={f} value={f}>{f}</option>)}
-                                                        </select>
-                                                    </div>
-                                                    <PhaseMultiSelect
-                                                        items={getFilteredPolicyLibrary(backendPolicyCategoryFilter)}
-                                                        selected={createProxyModal.backendFrameworkAttachment.policies}
-                                                        onToggle={(name, checked) => toggleAttachmentItem("backendFrameworkAttachment", "policies", name, checked)}
-                                                        onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "policies", name, phaseKey, checked)}
-                                                        getKey={(p) => p.name}
-                                                        getLabel={(p) => p.name}
-                                                        getIcon={(p) => p.icon}
-                                                        emptyMessage="No policies in this category."
-                                                    />
-                                                </div>
+                                                <PhaseMultiSelect
+                                                    items={getFilteredPolicyLibrary(backendPolicyCategoryFilter)}
+                                                    selected={createProxyModal.backendFrameworkAttachment.policies}
+                                                    onToggle={(name, checked) => toggleAttachmentItem("backendFrameworkAttachment", "policies", name, checked)}
+                                                    onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "policies", name, phaseKey, checked)}
+                                                    getKey={(p) => p.name}
+                                                    getLabel={(p) => p.name}
+                                                    getIcon={(p) => p.icon}
+                                                    emptyMessage="No policies in this category."
+                                                />
                                             )}
                                         </div>
                                     </div>
@@ -2706,6 +2926,158 @@ ${declaredResources.map((r, idx) => {
                                     ))
                                 )}
                             </div>
+                        </div>
+                        {/* Security & Traffic Configuration — optionally writes a Key Value Map
+                            entry (keyed by this API's name) into the dialog's own Environment,
+                            the same "Config Map" (KVM_ENV_LEVEL) the Gateway Environments page
+                            manages — so an FC-* framework's shared flow can look this up at
+                            runtime via apiproxy.name to decide which auth/traffic rules apply.
+                            Security/CORS/Error-Handling/Traffic/Transformation are derived from
+                            the Attach Frameworks selections above, not re-entered here. */}
+                        <div className="space-y-3 border-t border-[#27314e] pt-4">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={kvmConfig.enabled}
+                                    onChange={(e) => setKvmConfig(prev => ({
+                                        ...defaultKvmConfig,
+                                        enabled: e.target.checked,
+                                        kvmName: prev.kvmName || DEFAULT_KVM_NAME,
+                                        // Seed the auth-mechanism sub-fields Attach Frameworks can't
+                                        // state directly from what's already detected, so a
+                                        // directly-picked VerifyAPIKey/OAuthV2/JWT Verify policy
+                                        // shows up pre-filled here too (OAuth wins if somehow both
+                                        // OAuthV2 and JWT Verify were picked — the dropdown is
+                                        // single-select, so only one mechanism can be pre-filled).
+                                        apikeyAuthFlag: kvmSignals.apikeyAuthFlag,
+                                        authMechanism: kvmSignals.oauthFlag ? "oauthFlag" : kvmSignals.jwtFlag ? "jwtFlag" : "",
+                                    }))}
+                                    className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                />
+                                <span className="text-sm font-medium text-white">Create Key Value Map entry (Security &amp; Traffic Configuration)</span>
+                            </label>
+
+                            {kvmConfig.enabled && (
+                                <div className="space-y-4 rounded-lg border border-[#2a3550] bg-[#0f1117]/40 p-4">
+                                    <div>
+                                        <label className="text-sm font-medium text-white">Key Value Map Name</label>
+                                        <input
+                                            type="text"
+                                            value={kvmConfig.kvmName}
+                                            onChange={(e) => setKvmConfig(prev => ({ ...prev, kvmName: e.target.value }))}
+                                            placeholder={DEFAULT_KVM_NAME}
+                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
+                                        />
+                                        <p className="mt-1 text-xs text-slate-500">
+                                            Created in "{createProxyEnv || "the selected Environment"}" if it doesn't already exist — the same Config Map shown under Environments.
+                                        </p>
+                                    </div>
+
+                                    {/* Read-only — derived from whatever's picked in Attach Frameworks
+                                        (Proxy/Backend) above, not a second set of toggles to keep in sync. */}
+                                    <div>
+                                        <label className="text-sm font-medium text-white">Detected from Attach Frameworks</label>
+                                        <p className="mt-0.5 text-xs text-slate-500">Pick a framework/policy above to change these — they aren't editable here.</p>
+                                        <div className="mt-2 grid grid-cols-2 gap-2">
+                                            {[
+                                                ["authEnabled", "Security Enforcement"],
+                                                ["corsFlag", "CORS"],
+                                                ["errorHandlingFlag", "Error Handling"],
+                                                ["trafficManagementFlag", "Traffic Management"],
+                                                ["transformationFlag", "Message Transformation"],
+                                            ].map(([flag, label]) => {
+                                                const on = kvmSignals[flag];
+                                                const source = kvmSignals.sources.find((s) => s.flag === flag);
+                                                return (
+                                                    <div
+                                                        key={flag}
+                                                        className={cn(
+                                                            "flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm",
+                                                            on ? "border-emerald-500/40 bg-emerald-500/10" : "border-[#2a3550] bg-[#0f1117]"
+                                                        )}
+                                                    >
+                                                        <span className={on ? "text-emerald-300" : "text-slate-400"}>{label}</span>
+                                                        <span className="text-xs text-slate-500 truncate">
+                                                            {on ? `${source?.label} (${source?.side})` : "Not selected"}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {kvmSignals.sources.length === 0 && (
+                                            <p className="mt-2 text-xs text-amber-400">
+                                                No matching Attach Frameworks selection found — this entry will have every flag off. Pick a Security/CORS/Traffic/Exception/Transformation framework (or a VerifyAPIKey/OAuthV2/JWT Verify/SpikeArrest policy) above to populate it.
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Auth mechanism specifics — only meaningful once Security
+                                        Enforcement was actually detected above. API Key is its own
+                                        toggle (revealing the header-name text box); the remaining
+                                        six mechanisms share a single "Auth Mechanism" dropdown
+                                        rather than one dropdown each. */}
+                                    {kvmSignals.authEnabled && (
+                                        <div className="space-y-3">
+                                            <label className="text-sm font-medium text-white">Auth Mechanisms</label>
+                                            <div>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={kvmConfig.apikeyAuthFlag}
+                                                        onChange={(e) => setKvmConfig(prev => ({ ...prev, apikeyAuthFlag: e.target.checked }))}
+                                                        className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                                    />
+                                                    <span className="text-white text-sm">API Key</span>
+                                                </label>
+                                                {kvmConfig.apikeyAuthFlag && (
+                                                    <div className="mt-2 ml-6">
+                                                        <label className="text-xs text-slate-400">API Key Header Name</label>
+                                                        <input
+                                                            type="text"
+                                                            value={kvmConfig.apikeyHeaderName}
+                                                            onChange={(e) => setKvmConfig(prev => ({ ...prev, apikeyHeaderName: e.target.value }))}
+                                                            placeholder="x-api-key"
+                                                            className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400">Auth Mechanism</label>
+                                                <select
+                                                    value={kvmConfig.authMechanism}
+                                                    onChange={(e) => setKvmConfig(prev => ({ ...prev, authMechanism: e.target.value }))}
+                                                    className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1.5 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
+                                                >
+                                                    {AUTH_MECHANISM_OPTIONS.map((opt) => (
+                                                        <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Traffic Management — spikearrestEnabled has no toggle of its
+                                        own; it's implicitly true whenever this section shows at all
+                                        (trafficManagementFlag detected above), per spec. Only the
+                                        rate is ever entered. */}
+                                    {kvmSignals.trafficManagementFlag && (
+                                        <div className="space-y-3">
+                                            <label className="text-sm font-medium text-white">Traffic Management</label>
+                                            <div>
+                                                <label className="text-xs text-slate-400">Spike Arrest Rate</label>
+                                                <input
+                                                    type="text"
+                                                    value={kvmConfig.spikearrestRate}
+                                                    onChange={(e) => setKvmConfig(prev => ({ ...prev, spikearrestRate: e.target.value }))}
+                                                    placeholder="e.g. 30ps"
+                                                    className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">

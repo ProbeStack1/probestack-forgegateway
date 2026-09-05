@@ -1,9 +1,9 @@
 // src/components/Gateway/ProxiesView.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
     Eye, Copy, GitBranch, ArchiveIcon, Plus, Search, Loader2,
-    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown, RefreshCw
+    AlertCircle, X, CheckCircle, Trash2Icon, FileText, ArrowRight, FileCode2, ChevronDown, RefreshCw, Info
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
@@ -226,7 +226,33 @@ const DeployModeCard = ({ active, title, description, detail, onClick }) => (
 // own Request/Response checkboxes; both may be checked at once (the same step then
 // runs in both phases), but the caller's onTogglePhase refuses to leave neither
 // checked, since that step would compile away to nothing in the generated bundle.
-const PhaseMultiSelect = ({ items, selected, onToggle, onTogglePhase, getKey, getLabel, getIcon, emptyMessage }) => {
+// Small (i) affixed after a framework's name — hovering fetches (once, then
+// cached by the caller) and shows the real policies bundled inside that
+// shared flow, straight from Apigee, instead of leaving "what's actually in
+// this framework" a mystery until after it's attached.
+const PolicyInfoIcon = ({ label, info, onHover }) => (
+    <div className="group relative shrink-0" onMouseEnter={onHover}>
+        <Info className="h-3.5 w-3.5 text-slate-500 hover:text-slate-300" />
+        <div className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 hidden w-64 rounded-lg border border-[#2a3550] bg-[#0f1117] p-2.5 text-xs shadow-xl group-hover:block">
+            <div className="mb-1.5 font-semibold text-white">{label} — policies inside</div>
+            {!info || info.status === "loading" ? (
+                <div className="text-slate-400">Loading…</div>
+            ) : info.status === "error" ? (
+                <div className="text-red-400">Couldn't load policies.</div>
+            ) : info.policies.length === 0 ? (
+                <div className="text-slate-400">No policies found.</div>
+            ) : (
+                <ul className="space-y-1 text-slate-300">
+                    {info.policies.map((p) => (
+                        <li key={p} className="truncate">{p.replace(/^[A-Za-z]{2,5}-/, "")}</li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    </div>
+);
+
+const PhaseMultiSelect = ({ items, selected, onToggle, onTogglePhase, getKey, getLabel, getIcon, getInfoKey, policyInfoCache, onHoverInfo, emptyMessage }) => {
     if (!items || items.length === 0) {
         return <p className="mt-1 text-sm text-amber-400">{emptyMessage}</p>;
     }
@@ -237,18 +263,28 @@ const PhaseMultiSelect = ({ items, selected, onToggle, onTogglePhase, getKey, ge
                     const key = getKey(item);
                     const step = selected.find((s) => s.name === key);
                     const Icon = getIcon ? getIcon(item) : null;
+                    const infoKey = getInfoKey ? getInfoKey(item) : null;
                     return (
                         <div key={key} className="flex items-center gap-3 rounded-md px-1.5 py-1.5 hover:bg-[#151a2b]">
-                            <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={!!step}
-                                    onChange={(e) => onToggle(key, e.target.checked)}
-                                    className="shrink-0 rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
-                                />
-                                {Icon && <Icon className="h-4 w-4 text-slate-300 shrink-0" />}
-                                <span className="text-white text-sm truncate">{getLabel(item)}</span>
-                            </label>
+                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                <label className="flex items-center gap-2 min-w-0 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!step}
+                                        onChange={(e) => onToggle(key, e.target.checked)}
+                                        className="shrink-0 rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
+                                    />
+                                    {Icon && <Icon className="h-4 w-4 text-slate-300 shrink-0" />}
+                                    <span className="text-white text-sm truncate">{getLabel(item)}</span>
+                                </label>
+                                {infoKey && (
+                                    <PolicyInfoIcon
+                                        label={getLabel(item)}
+                                        info={policyInfoCache?.[infoKey]}
+                                        onHover={() => onHoverInfo?.(infoKey)}
+                                    />
+                                )}
+                            </div>
                             {step && (
                                 <div className="flex items-center gap-3 shrink-0">
                                     <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
@@ -444,6 +480,41 @@ export const ProxiesView = ({ showMessage }) => {
         ),
         [globalFunctions]
     );
+
+    // Policies bundled inside each framework/global-function shared flow — shown
+    // on hover via the (i) icon next to its name in the Attach Frameworks pickers
+    // above (see PolicyInfoIcon). fetchGlobalFunctions above only lists shared flow
+    // names/metadata, not their contents, so each one's actual policy list is
+    // fetched lazily (on first hover) and cached here rather than eagerly for
+    // every framework up front.
+    const [frameworkPolicyInfo, setFrameworkPolicyInfo] = useState({});
+    const frameworkPolicyRequested = useRef(new Set());
+
+    const loadFrameworkPolicyInfo = (name) => {
+        if (!name || frameworkPolicyRequested.current.has(name)) return;
+        const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
+        if (!effectiveOrg) return;
+        frameworkPolicyRequested.current.add(name);
+        setFrameworkPolicyInfo((prev) => ({ ...prev, [name]: { status: "loading", policies: [] } }));
+        (async () => {
+            try {
+                const token = await fetchApigeeToken();
+                const res = await fetch(
+                    `https://forgegateway.probestack.io/apigee-wrapper/organizations/${effectiveOrg}/sharedflows/${encodeURIComponent(name)}/details`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (!res.ok) throw new Error(`Failed to fetch shared flow details: ${res.statusText}`);
+                const data = await res.json();
+                const latestRevision = data.revisionDetails?.[data.revisionDetails.length - 1];
+                const policies = latestRevision?.data?.policies || [];
+                setFrameworkPolicyInfo((prev) => ({ ...prev, [name]: { status: "ready", policies } }));
+            } catch (err) {
+                console.error(`Failed to fetch policies for shared flow "${name}"`, err);
+                frameworkPolicyRequested.current.delete(name); // allow retry on next hover
+                setFrameworkPolicyInfo((prev) => ({ ...prev, [name]: { status: "error", policies: [] } }));
+            }
+        })();
+    };
 
     const fetchProductsList = async () => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
@@ -2611,6 +2682,9 @@ ${declaredResources.map((r, idx) => {
                                                         onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "frameworks", name, phaseKey, checked)}
                                                         getKey={(sf) => sf.name}
                                                         getLabel={(sf) => getRecommendedFrameworkLabel(sf.name)}
+                                                        getInfoKey={(sf) => sf.name}
+                                                        policyInfoCache={frameworkPolicyInfo}
+                                                        onHoverInfo={loadFrameworkPolicyInfo}
                                                         emptyMessage="No recommended frameworks available."
                                                     />
                                                 )
@@ -2627,6 +2701,9 @@ ${declaredResources.map((r, idx) => {
                                                         onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("frameworkAttachment", "frameworks", name, phaseKey, checked)}
                                                         getKey={(sf) => sf.name}
                                                         getLabel={(sf) => sf.name}
+                                                        getInfoKey={(sf) => sf.name}
+                                                        policyInfoCache={frameworkPolicyInfo}
+                                                        onHoverInfo={loadFrameworkPolicyInfo}
                                                         emptyMessage="No global functions available."
                                                     />
                                                 )
@@ -2787,6 +2864,9 @@ ${declaredResources.map((r, idx) => {
                                                         onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "frameworks", name, phaseKey, checked)}
                                                         getKey={(sf) => sf.name}
                                                         getLabel={(sf) => getRecommendedFrameworkLabel(sf.name)}
+                                                        getInfoKey={(sf) => sf.name}
+                                                        policyInfoCache={frameworkPolicyInfo}
+                                                        onHoverInfo={loadFrameworkPolicyInfo}
                                                         emptyMessage="No recommended frameworks available."
                                                     />
                                                 )
@@ -2803,6 +2883,9 @@ ${declaredResources.map((r, idx) => {
                                                         onTogglePhase={(name, phaseKey, checked) => toggleAttachmentPhase("backendFrameworkAttachment", "frameworks", name, phaseKey, checked)}
                                                         getKey={(sf) => sf.name}
                                                         getLabel={(sf) => sf.name}
+                                                        getInfoKey={(sf) => sf.name}
+                                                        policyInfoCache={frameworkPolicyInfo}
+                                                        onHoverInfo={loadFrameworkPolicyInfo}
                                                         emptyMessage="No global functions available."
                                                     />
                                                 )

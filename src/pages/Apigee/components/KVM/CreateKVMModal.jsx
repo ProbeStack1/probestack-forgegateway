@@ -75,8 +75,11 @@ export default function CreateKVMModal({
         setEntries(prev => prev.filter(e => e.id !== id));
     };
 
+    // Same field styling as the "Create a proxy" dialog (Gateway/CreateProxyModal.jsx)
+    // — this modal previously used bg-dark-800/border-dark-700, which read as a
+    // different (lighter grey) surface than every other create dialog in the app.
     const inputStyle =
-        "w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary";
+        "w-full bg-[#0f1117] border border-[#2a3550] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-[#ff5b1f]";
 
     const handleChange = (key, value) => {
         setForm(prev => ({ ...prev, [key]: value }));
@@ -279,10 +282,10 @@ export default function CreateKVMModal({
     return (
         <div className="fixed h-full inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
 
-            <div className="h-[90vh] w-[800px] rounded-xl border border-dark-700 bg-[#15192b]/95 backdrop-blur-xl shadow-lg">
+            <div className="h-[90vh] w-[800px] rounded-xl border border-[#27314e] bg-[#111520] shadow-lg">
 
                 {/* Header */}
-                <div className="flex justify-between items-center px-6 py-4 border-b border-dark-700 modal-header" style={{ height: "4.5rem" }}>
+                <div className="flex justify-between items-center px-6 py-4 border-b border-[#27314e] modal-header" style={{ height: "4.5rem" }}>
                     <div>
                         <h2 className="text-lg font-semibold text-white">
                             {editData ? "Edit Key Value Map" : "Create Key Value Map"}
@@ -426,7 +429,7 @@ export default function CreateKVMModal({
                                 .map((entry,index,filteredEntries) => (
                                     <div
                                         key={entry.id}
-                                        className="grid grid-cols-12 gap-2 items-center bg-dark-800/40 p-2 rounded-md"
+                                        className="grid grid-cols-12 gap-2 items-center bg-[#0f1117]/50 border border-[#2a3550] p-2 rounded-md"
                                     >
                                         {/* Key */}
                                         <input
@@ -508,7 +511,7 @@ export default function CreateKVMModal({
                 </div>
 
                 {/* Footer */}
-                <div className="flex justify-end items-center gap-3 px-6 py-4 border-t border-dark-700 modal-footer" style={{ height: "4.5rem" }}>
+                <div className="flex justify-end items-center gap-3 px-6 py-4 border-t border-[#27314e] modal-footer" style={{ height: "4.5rem" }}>
                     <button
                         onClick={onClose}
                         className="px-4 py-2 rounded-lg bg-dark-700 text-gray-300 hover:bg-dark-600"

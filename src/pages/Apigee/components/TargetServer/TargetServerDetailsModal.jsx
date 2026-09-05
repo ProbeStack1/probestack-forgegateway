@@ -22,15 +22,15 @@ export default function TargetServerDetailsModal({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-xl rounded-xl border border-dark-700 bg-[#15192b] shadow-xl">
-                <div className="flex items-center justify-between border-b border-dark-700 px-5 py-4">
+            <div className="w-full max-w-xl rounded-xl border border-[#27314e] bg-[#111520] shadow-xl">
+                <div className="flex items-center justify-between border-b border-[#27314e] px-5 py-4">
                     <div>
                         <h3 className="text-base font-semibold text-white">Backend Service Details</h3>
                         <p className="text-xs text-gray-400">Fetched from Apigee</p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="rounded-md p-2 text-gray-400 hover:bg-dark-700 hover:text-white"
+                        className="rounded-md p-2 text-gray-400 hover:bg-white/5 hover:text-white"
                     >
                         <X size={16} />
                     </button>
@@ -48,7 +48,7 @@ export default function TargetServerDetailsModal({
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            <div className="divide-y divide-dark-700 rounded-lg border border-dark-700">
+                            <div className="divide-y divide-[#2a3550] rounded-lg border border-[#2a3550]">
                                 {rows.map(([label, value]) => (
                                     <div key={label} className="grid grid-cols-3 gap-4 px-4 py-3">
                                         <span className="text-sm text-gray-400">{label}</span>
@@ -60,11 +60,11 @@ export default function TargetServerDetailsModal({
                             </div>
 
                             {sslInfo && Object.keys(sslInfo).length > 0 && (
-                                <details className="rounded-lg border border-dark-700 bg-dark-800/40 p-4">
+                                <details className="rounded-lg border border-[#2a3550] bg-[#0f1117]/50 p-4">
                                     <summary className="cursor-pointer text-sm font-medium text-gray-200">
                                         SSL Info
                                     </summary>
-                                    <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-[#0f172a] p-3 text-xs text-gray-300">
+                                    <pre className="mt-3 max-h-40 overflow-auto rounded-md bg-[#0f1117] p-3 text-xs text-gray-300">
                                         {JSON.stringify(sslInfo, null, 2)}
                                     </pre>
                                 </details>
@@ -73,7 +73,7 @@ export default function TargetServerDetailsModal({
                     )}
                 </div>
 
-                <div className="flex justify-end border-t border-dark-700 px-5 py-4">
+                <div className="flex justify-end border-t border-[#27314e] px-5 py-4">
                     <button
                         onClick={onClose}
                         className="rounded-lg bg-dark-700 px-4 py-2 text-sm text-gray-300 hover:bg-dark-600"

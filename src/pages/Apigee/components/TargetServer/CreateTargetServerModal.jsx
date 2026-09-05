@@ -173,8 +173,11 @@ export default function CreateTargetServerModal({
         }
     }, [editData]);
 
+    // Same field styling as the "Create a proxy" dialog (Gateway/CreateProxyModal.jsx)
+    // — this modal previously used bg-dark-800/border-dark-700, which read as a
+    // different (lighter grey) surface than every other create dialog in the app.
     const inputStyle =
-        "w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary";
+        "w-full bg-[#0f1117] border border-[#2a3550] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-[#ff5b1f]";
 
     const handleChange = (key, value) => {
         setForm(prev => ({ ...prev, [key]: value }));
@@ -432,7 +435,7 @@ export default function CreateTargetServerModal({
                     </div>
 
                     {/* SSL Section (unchanged) */}
-                    <div className="space-y-4 pt-4 border-t border-dark-700">
+                    <div className="space-y-4 pt-4 border-t border-[#27314e]">
                         <div>
                             <label className="text-sm text-gray-400 block mb-2">Security Configuration</label>
                             <div className="flex gap-6">

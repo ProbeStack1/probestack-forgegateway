@@ -1359,7 +1359,7 @@ const GovernanceDashboardPage = ({ defaultOrg, onBack, onOpenScan }) => {
 const FAMILY_HEADINGS = {
   compliance: { title: "Compliance Rules", subtitle: "Governance + quality rules for your Apigee proxies. Pick rules, hit Run, download or email the report." },
   owasp: { title: "OWASP 2021 Top 10", subtitle: "OWASP API Security Top 10 controls evaluated against the selected Apigee proxy." },
-  linting: { title: "Apigee Linting", subtitle: "Static analysis of Apigee proxy bundles (apigeelint) — policies, endpoints, targets & flows." },
+  linting: { title: "Linting", subtitle: "Static analysis of Apigee proxy bundles (apigeelint) — policies, endpoints, targets & flows." },
 };
 
 const GovernanceWorkspace = ({ showMessage }) => {
@@ -1509,7 +1509,7 @@ const GovernanceWorkspace = ({ showMessage }) => {
           {[
             { id: "compliance", label: "Compliance", icon: <ShieldCheck className="h-3.5 w-3.5" /> },
             { id: "owasp", label: "OWASP", icon: <ShieldAlert className="h-3.5 w-3.5" /> },
-            { id: "linting", label: "Apigee Linting", icon: <Code className="h-3.5 w-3.5" /> },
+            { id: "linting", label: "Linting", icon: <Code className="h-3.5 w-3.5" /> },
           ].map((t) => (
             <button key={t.id} onClick={() => setActiveTab(t.id)}
               className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${activeTab === t.id ? "bg-orange-500/20 text-white border border-orange-500/40" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}

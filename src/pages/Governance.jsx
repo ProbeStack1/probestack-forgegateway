@@ -3304,7 +3304,7 @@ const customHasMore = useMemo(() => {
                 { id: "owasp", label: "OWASP Top 10", icon: <ShieldAlert className="h-4 w-4" /> },
                 { id: "linting", label: "API Linting", icon: <Sparkles className="h-4 w-4" /> },
                 ...(assetType === "APIGEE_PROXY"
-                  ? [{ id: "apigeeLinting", label: "Apigee Linting", icon: <Code className="h-4 w-4" /> }]
+                  ? [{ id: "apigeeLinting", label: "Linting", icon: <Code className="h-4 w-4" /> }]
                   : []),
               ].map((tab) => (
                 <button

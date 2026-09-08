@@ -23,6 +23,13 @@ import { POLICY_TYPE_TO_ELEMENT, MINIMAL_POLICY_XML, policyResourceFile, flatten
 // Two "base" shared flows every org ships with — never offered as a "Recommended"
 // framework since attaching a framework to itself/the base AI Gateway framework is meaningless.
 const EXCLUDED_RECOMMENDED_FRAMEWORKS = ["API-Runtime-Framework-V1", "SF-AIGatewayFramework-V1"];
+// The org-wide runtime governance shared flow every generated proxy always calls —
+// regardless of which individual frameworks/policies are picked in "Attach Frameworks"
+// (those only drive the KVM security/traffic signals, see deriveSecurityKvmSignals) —
+// via a single FlowCallout added to both the Proxy's and the Target's PreFlow/Request
+// and PostFlow/Response. Reuses EXCLUDED_RECOMMENDED_FRAMEWORKS[0] as the single source
+// of truth for its real shared-flow-bundle name.
+const MASTER_RUNTIME_FRAMEWORK_NAME = EXCLUDED_RECOMMENDED_FRAMEWORKS[0];
 const POLICY_LIBRARY_FLAT = flattenPolicyLibrary();
 
 // UI-only relabeling for the "FS Recommended" framework picker — the underlying shared
@@ -143,14 +150,17 @@ const AUTH_MECHANISM_OPTIONS = [
     { value: "customAuthFlag", label: "Custom Auth" },
 ];
 const defaultKvmConfig = {
-    enabled: false,
+    // Every proxy always gets its Key Value Map entry verified/created — this is no
+    // longer an opt-in checkbox, so `enabled` stays true for the dialog's whole
+    // lifetime (nothing in the UI can turn it off anymore).
+    enabled: true,
     kvmName: DEFAULT_KVM_NAME,
     // Auth-mechanism specifics and the spike arrest rate have no other source in the
     // dialog, so they stay user-editable even though their gates (authEnabled,
     // trafficManagementFlag) are derived rather than toggled here. Seeded from
-    // deriveSecurityKvmSignals() the moment "Create Key Value Map entry" is checked
-    // (see its onChange below) so a directly-selected VerifyAPIKey/OAuthV2/JWT
-    // Verify policy shows up pre-filled instead of silently ignored.
+    // deriveSecurityKvmSignals() as soon as the dialog opens (see its useEffect)
+    // so a directly-selected VerifyAPIKey/OAuthV2/JWT Verify policy shows up
+    // pre-filled instead of silently ignored.
     apikeyAuthFlag: false,
     apikeyHeaderName: "",
     authMechanism: "", // one of AUTH_MECHANISM_OPTIONS' values
@@ -395,6 +405,10 @@ export const ProxiesView = ({ showMessage }) => {
     // Create Proxy form, Apigee X context only — mirrors APIDeploy.jsx's promote/rollback chooser.
     const [deployModeStep, setDeployModeStep] = useState(false);
     const [deployMode, setDeployMode] = useState("cicd"); // "direct" | "cicd"
+    // Spinner state for the "Create"/"Continue"/"Create Proxy"/"Continue to Pipeline
+    // Setup" buttons — set for the whole duration of createProxy()'s network calls
+    // (or handleContinueToCicd's navigation), regardless of which deploy mode was chosen.
+    const [creatingProxy, setCreatingProxy] = useState(false);
     const [availableCreateEnvs, setAvailableCreateEnvs] = useState([]);
     const [loadingCreateEnvs, setLoadingCreateEnvs] = useState(false);
     const [fieldErrors, setFieldErrors] = useState({ name: "", basePath: "", version: "" });
@@ -429,6 +443,22 @@ export const ProxiesView = ({ showMessage }) => {
     // has no other source (the KVM name, auth mechanism specifics, spike arrest rate).
     const [kvmConfig, setKvmConfig] = useState(defaultKvmConfig);
     const kvmSignals = deriveSecurityKvmSignals(createProxyModal.frameworkAttachment, createProxyModal.backendFrameworkAttachment);
+    // The KVM section is always on now (no more opt-in checkbox to seed it from), so
+    // pre-fill apikeyAuthFlag/authMechanism reactively the moment Attach Frameworks
+    // detects API-key/OAuth/JWT auth — but only while the user hasn't touched either
+    // field themselves, so a deliberate override never gets clobbered by a later
+    // framework/policy change.
+    const kvmAuthTouchedRef = useRef(false);
+    useEffect(() => {
+        if (kvmAuthTouchedRef.current) return;
+        if (!kvmSignals.authEnabled) return;
+        setKvmConfig((prev) => ({
+            ...prev,
+            apikeyAuthFlag: kvmSignals.apikeyAuthFlag,
+            authMechanism: kvmSignals.oauthFlag ? "oauthFlag" : kvmSignals.jwtFlag ? "jwtFlag" : prev.authMechanism,
+        }));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [kvmSignals.authEnabled, kvmSignals.apikeyAuthFlag, kvmSignals.oauthFlag, kvmSignals.jwtFlag]);
 
     // Existing target servers list & selected one
     const [targetServers, setTargetServers] = useState([]);
@@ -1128,6 +1158,19 @@ export const ProxiesView = ({ showMessage }) => {
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 
+    // The Condition every declared Resource's Flow gets by default, purely from its
+    // Verb + Path — pre-filled straight into the Condition input's value (not just
+    // shown as a hint), which the user can then freely edit. Returns the raw,
+    // human-readable condition text (no XML escaping) since it's edited as plain
+    // text in the UI; generateProxyZip's Flows builder escapes it only once, at the
+    // point it's actually written into the XML element.
+    const buildDefaultCondition = (method, rawPath) => {
+        const path = (rawPath || "").trim();
+        if (!path) return "";
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+        return `(proxy.pathsuffix MatchesPath "${normalizedPath}") and (request.verb = "${(method || "GET").toUpperCase()}")`;
+    };
+
     // A "Recommended"/"Custom Framework" selection attaches via a FlowCallout, exactly
     // like real Apigee proxies do — NOT by downloading the shared flow's bundle and
     // copying its internal policies into the new proxy. FlowCallout stays live-linked
@@ -1166,13 +1209,16 @@ export const ProxiesView = ({ showMessage }) => {
     };
 
     // Resolves the "Attach Frameworks" selection into { policies, resourceFiles,
-    // requestSteps, responseSteps } to bake into the generated bundle. "Policy" mode
-    // generates minimal policy definitions straight from the shared POLICY_LIBRARY
-    // catalog (plus a stub resource for any Javascript-backed ones); "FS Recommended"/
-    // "Custom Framework" mode generates one FlowCallout policy per selected framework
-    // (see buildFlowCalloutArtifact above). Either way, each framework/policy's own
-    // Request/Response checkboxes decide which phase list(s) its Step lands in, so the
-    // same selection can run in Request, Response, or both.
+    // requestSteps, responseSteps } to bake into the generated bundle. Only "Policy"
+    // mode contributes anything here — it generates minimal policy definitions
+    // straight from the shared POLICY_LIBRARY catalog (plus a stub resource for any
+    // Javascript-backed ones), phased per each policy's own Request/Response
+    // checkboxes. "FS Recommended"/"Custom Framework" mode deliberately contributes
+    // NO per-framework FlowCallout here — every generated proxy always calls the
+    // single MASTER_RUNTIME_FRAMEWORK_NAME shared flow instead (added unconditionally
+    // in generateProxyZip), and the frameworks picked in those two modes only drive
+    // the KVM security/traffic signals (see deriveSecurityKvmSignals) — never an
+    // individual Step of their own.
     const resolveAttachedPolicies = (frameworkAttachment) => {
         const mode = frameworkAttachment?.mode;
         const policies = [];
@@ -1201,12 +1247,6 @@ export const ProxiesView = ({ showMessage }) => {
                 mergeResourceFile(artifact.resourceFile);
                 mergeSteps([artifact.name], step);
             });
-        } else if (mode === "recommended" || mode === "custom") {
-            (frameworkAttachment.frameworks || []).forEach((step) => {
-                const artifact = buildFlowCalloutArtifact(step.name);
-                mergePolicy(artifact.name, artifact.xml);
-                mergeSteps([artifact.name], step);
-            });
         }
         return { policies, resourceFiles, requestSteps, responseSteps };
     };
@@ -1223,6 +1263,16 @@ export const ProxiesView = ({ showMessage }) => {
     }) => {
         const zip = new JSZip();
         const apiproxyFolder = zip.folder("apiproxy");
+
+        // Every generated proxy always calls into the org-wide runtime governance shared
+        // flow — regardless of what (if anything) was picked in "Attach Frameworks" —
+        // via a single FlowCallout to FC-API-Runtime-Framework, added once to both the
+        // Proxy's and the Target's PreFlow/Request and PostFlow/Response. This is the
+        // ONLY framework Step ever added; individually-selected FS Recommended/Custom
+        // frameworks never get their own Step (they only drive the KVM signals).
+        const masterFrameworkArtifact = buildFlowCalloutArtifact(MASTER_RUNTIME_FRAMEWORK_NAME);
+        const withMasterStep = (steps) =>
+            steps.includes(masterFrameworkArtifact.name) ? steps : [...steps, masterFrameworkArtifact.name];
 
         // De-dupe each lane by policy name in case a framework bundle repeats a name.
         const uniqueProxyPolicies = Array.from(new Map(attachedPolicies.map((p) => [p.name, p])).values());
@@ -1261,6 +1311,7 @@ export const ProxiesView = ({ showMessage }) => {
         // PreFlow, target PreFlow, per-resource) into one manifest/file set; a name
         // picked in more than one lane only needs declaring/writing once.
         const allPoliciesByName = new Map();
+        allPoliciesByName.set(masterFrameworkArtifact.name, masterFrameworkArtifact);
         uniqueProxyPolicies.forEach((p) => allPoliciesByName.set(p.name, p));
         uniqueTargetPolicies.forEach((p) => { if (!allPoliciesByName.has(p.name)) allPoliciesByName.set(p.name, p); });
         resourcePolicyArtifacts.forEach((p) => { if (!allPoliciesByName.has(p.name)) allPoliciesByName.set(p.name, { name: p.name, xml: p.xml }); });
@@ -1309,27 +1360,33 @@ export const ProxiesView = ({ showMessage }) => {
 ${declaredResources.map((r, idx) => {
                 const method = escapeXml((r.method || "GET").toUpperCase());
                 const path = escapeXml(r.path.trim().startsWith("/") ? r.path.trim() : `/${r.path.trim()}`);
-                // The custom condition (if any) is ANDed onto the verb/path match rather
-                // than replacing it, so it narrows the flow (e.g. a header or query param
-                // check) instead of having to restate the routing logic.
-                const extraCondition = r.condition && r.condition.trim();
-                const condition = `(proxy.pathsuffix MatchesPath "${path}") and (request.verb = "${method}")`
-                    + (extraCondition ? ` and (${escapeXml(extraCondition.trim())})` : "");
+                // The Condition input is pre-filled with buildDefaultCondition and freely
+                // editable, so whatever's in it (edited or not) is the whole condition —
+                // no more ANDing a separate "extra" condition onto an implicit default.
+                // Falls back to the default only if the user cleared the field entirely.
+                // escapeXml runs once here, at the point this raw text actually becomes
+                // XML element content — not inside buildDefaultCondition, which the UI
+                // also uses to prefill the plain-text input.
+                const condition = escapeXml((r.condition && r.condition.trim()) || buildDefaultCondition(r.method, r.path));
                 const steps = r.policies || [];
                 const requestSteps = steps.filter((s) => s.request).map((s) => `<Step><Name>${escapeXml(s.name)}</Name></Step>`).join("");
                 const responseSteps = steps.filter((s) => s.response).map((s) => `<Step><Name>${escapeXml(s.name)}</Name></Step>`).join("");
                 const requestXml = requestSteps ? `\n      <Request>${requestSteps}</Request>` : "";
                 const responseXml = responseSteps ? `\n      <Response>${responseSteps}</Response>` : "";
-                return `    <Flow name="resource-${idx + 1}">
-      <Description>${method} ${path}</Description>
+                // Flow name mirrors the Description below (verb + resource path) instead
+                // of an opaque "resource-N" label, so both the generated XML and the Proxy
+                // Details view read the same human-meaningful identifier.
+                const flowName = `${method} ${path}`;
+                return `    <Flow name="${flowName}">
+      <Description>${flowName}</Description>
       <Condition>${condition}</Condition>${requestXml}${responseXml}
     </Flow>`;
             }).join("\n")}
   </Flows>`
             : "";
 
-        const proxyPreFlowXml = buildPreFlowXml(attachedRequestSteps);
-        const proxyPostFlowXml = buildPostFlowXml(attachedResponseSteps);
+        const proxyPreFlowXml = buildPreFlowXml(withMasterStep(attachedRequestSteps));
+        const proxyPostFlowXml = buildPostFlowXml(withMasterStep(attachedResponseSteps));
 
         const proxyEndpointXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ProxyEndpoint name="default">
@@ -1343,8 +1400,8 @@ ${declaredResources.map((r, idx) => {
         if (template === "reverse") {
             const targetsFolder = apiproxyFolder.folder("targets");
 
-            const targetPreFlowXml = buildPreFlowXml(targetAttachedRequestSteps);
-            const targetPostFlowXml = buildPostFlowXml(targetAttachedResponseSteps);
+            const targetPreFlowXml = buildPreFlowXml(withMasterStep(targetAttachedRequestSteps));
+            const targetPostFlowXml = buildPostFlowXml(withMasterStep(targetAttachedResponseSteps));
             const httpTargetConnectionXml = targetServer
                 ? `<HTTPTargetConnection>
     <LoadBalancer>
@@ -1599,6 +1656,8 @@ ${declaredResources.map((r, idx) => {
             }
         }
 
+        setCreatingProxy(true);
+        try {
         const token = await fetchApigeeToken();
         if (!token) {
             showMessage("Failed to obtain authentication token.", "error");
@@ -1735,13 +1794,14 @@ ${declaredResources.map((r, idx) => {
                 }
             }
 
-            // Security & Traffic Configuration (optional) — writes this API's config as
-            // one KVM entry, keyed by its name, into the dialog's own Environment. Failure
-            // here doesn't roll back the already-created API; it's surfaced as a warning.
-            // Re-derived from `modal` (this function's own snapshot of the form) rather
-            // than trusting the render-time kvmSignals, so it can never drift from what
-            // was actually attached to the proxy/backend that just got created.
-            if (kvmConfig.enabled) {
+            // Security & Traffic Configuration — mandatory for every proxy: writes this
+            // API's config as one KVM entry, keyed by its name, into the dialog's own
+            // Environment. Failure here doesn't roll back the already-created API; it's
+            // surfaced as a warning. Re-derived from `modal` (this function's own
+            // snapshot of the form) rather than trusting the render-time kvmSignals, so
+            // it can never drift from what was actually attached to the proxy/backend
+            // that just got created.
+            {
                 const kvmName = kvmConfig.kvmName.trim() || DEFAULT_KVM_NAME;
                 // Same tracking identity as the config-audit call above — the wrapper
                 // backend requires it (see ensureKvmExists) to attribute/authorize the
@@ -1775,6 +1835,9 @@ ${declaredResources.map((r, idx) => {
             navigate(`${proxyBasePath}/proxy/${modal.name}`, { state: { proxy: { name: modal.name } } });
         } catch (err) {
             showMessage(`Creation failed: ${err.message}`, "error");
+        }
+        } finally {
+            setCreatingProxy(false);
         }
     };
 
@@ -1829,6 +1892,7 @@ ${declaredResources.map((r, idx) => {
         setProxyPolicyCategoryFilter("All");
         setBackendPolicyCategoryFilter("All");
         setKvmConfig(defaultKvmConfig);
+        kvmAuthTouchedRef.current = false;
     };
 
     const handleCreateClick = () => {
@@ -1851,6 +1915,7 @@ ${declaredResources.map((r, idx) => {
         setProxyPolicyCategoryFilter("All");
         setBackendPolicyCategoryFilter("All");
         setKvmConfig(defaultKvmConfig);
+        kvmAuthTouchedRef.current = false;
 
         // Seed Environment/Project from the page-level GatewayContextSelector; the
         // user can still change either inside the dialog. When the page has "All
@@ -2223,6 +2288,7 @@ ${declaredResources.map((r, idx) => {
             {/* Create Proxy Modal - modified Backend section */}
             <Dialog open={createProxyModal.open} onOpenChange={(open) => {
                 if (!open) {
+                    if (creatingProxy) return;
                     closeCreateProxyModal();
                 } else {
                     setCreateProxyModal((prev) => ({ ...prev, open }));
@@ -2502,7 +2568,17 @@ ${declaredResources.map((r, idx) => {
                                                                 value={resource.method}
                                                                 onChange={(e) => setCreateProxyModal(prev => ({
                                                                     ...prev,
-                                                                    resources: prev.resources.map((r, i) => i === idx ? { ...r, method: e.target.value } : r),
+                                                                    // Re-sync the Condition input to the new default only if it
+                                                                    // still matches the old default (i.e. the user never
+                                                                    // hand-edited it) — a manually customized condition is left
+                                                                    // alone even though the verb changed.
+                                                                    resources: prev.resources.map((r, i) => {
+                                                                        if (i !== idx) return r;
+                                                                        const prevDefault = buildDefaultCondition(r.method, r.path);
+                                                                        const nextDefault = buildDefaultCondition(e.target.value, r.path);
+                                                                        const condition = (!r.condition || r.condition === prevDefault) ? nextDefault : r.condition;
+                                                                        return { ...r, method: e.target.value, condition };
+                                                                    }),
                                                                 }))}
                                                                 className="w-[110px] shrink-0 rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
                                                             >
@@ -2516,7 +2592,15 @@ ${declaredResources.map((r, idx) => {
                                                                 value={resource.path}
                                                                 onChange={(e) => setCreateProxyModal(prev => ({
                                                                     ...prev,
-                                                                    resources: prev.resources.map((r, i) => i === idx ? { ...r, path: e.target.value } : r),
+                                                                    // Same re-sync rule as the verb select above, keyed off the
+                                                                    // path instead.
+                                                                    resources: prev.resources.map((r, i) => {
+                                                                        if (i !== idx) return r;
+                                                                        const prevDefault = buildDefaultCondition(r.method, r.path);
+                                                                        const nextDefault = buildDefaultCondition(r.method, e.target.value);
+                                                                        const condition = (!r.condition || r.condition === prevDefault) ? nextDefault : r.condition;
+                                                                        return { ...r, path: e.target.value, condition };
+                                                                    }),
                                                                 }))}
                                                                 className="flex-1 rounded-lg border border-[#2a3550] bg-[#0f1117] px-3 py-2 text-white focus:outline-none focus:border-[#ff5b1f]"
                                                             />
@@ -2533,9 +2617,14 @@ ${declaredResources.map((r, idx) => {
                                                                 <X className="h-4 w-4" />
                                                             </button>
                                                         </div>
+                                                        {/* Prefilled with the default condition derived from Verb + Path
+                                                            the moment either changes (see the method/path onChange above)
+                                                            — shown right in the field, not just as a hint below it — and
+                                                            freely editable: type over it (e.g. append " and (...)") to
+                                                            layer on a custom condition, or replace it outright. */}
                                                         <input
                                                             type="text"
-                                                            placeholder='Condition (optional) — e.g. request.header.x-api-version = "v2"'
+                                                            placeholder='Condition — e.g. request.header.x-api-version = "v2"'
                                                             value={resource.condition || ""}
                                                             onChange={(e) => setCreateProxyModal(prev => ({
                                                                 ...prev,
@@ -3010,38 +3099,24 @@ ${declaredResources.map((r, idx) => {
                                 )}
                             </div>
                         </div>
-                        {/* Security & Traffic Configuration — optionally writes a Key Value Map
+                        {/* Security & Traffic Configuration — always writes a Key Value Map
                             entry (keyed by this API's name) into the dialog's own Environment,
                             the same "Config Map" (KVM_ENV_LEVEL) the Gateway Environments page
                             manages — so an FC-* framework's shared flow can look this up at
                             runtime via apiproxy.name to decide which auth/traffic rules apply.
-                            Security/CORS/Error-Handling/Traffic/Transformation are derived from
-                            the Attach Frameworks selections above, not re-entered here. */}
+                            Mandatory for every proxy (no opt-out toggle): createProxy() first
+                            verifies the Key Value Map exists, then creates/updates the entry —
+                            hence "Verify", not "Create". Security/CORS/Error-Handling/Traffic/
+                            Transformation are derived from the Attach Frameworks selections
+                            above, not re-entered here. */}
                         <div className="space-y-3 border-t border-[#27314e] pt-4">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    checked={kvmConfig.enabled}
-                                    onChange={(e) => setKvmConfig(prev => ({
-                                        ...defaultKvmConfig,
-                                        enabled: e.target.checked,
-                                        kvmName: prev.kvmName || DEFAULT_KVM_NAME,
-                                        // Seed the auth-mechanism sub-fields Attach Frameworks can't
-                                        // state directly from what's already detected, so a
-                                        // directly-picked VerifyAPIKey/OAuthV2/JWT Verify policy
-                                        // shows up pre-filled here too (OAuth wins if somehow both
-                                        // OAuthV2 and JWT Verify were picked — the dropdown is
-                                        // single-select, so only one mechanism can be pre-filled).
-                                        apikeyAuthFlag: kvmSignals.apikeyAuthFlag,
-                                        authMechanism: kvmSignals.oauthFlag ? "oauthFlag" : kvmSignals.jwtFlag ? "jwtFlag" : "",
-                                    }))}
-                                    className="rounded border-[#2a3550] bg-[#0f1117] text-[#ff5b1f] focus:ring-[#ff5b1f]"
-                                />
-                                <span className="text-sm font-medium text-white">Create Key Value Map entry (Security &amp; Traffic Configuration)</span>
-                            </label>
+                            <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
+                                <span className="text-sm font-medium text-white">Verify Key Value Map entry (Security &amp; Traffic Configuration)</span>
+                                <span className="text-xs text-slate-500">— required for every proxy</span>
+                            </div>
 
-                            {kvmConfig.enabled && (
-                                <div className="space-y-4 rounded-lg border border-[#2a3550] bg-[#0f1117]/40 p-4">
+                            <div className="space-y-4 rounded-lg border border-[#2a3550] bg-[#0f1117]/40 p-4">
                                     <div>
                                         <label className="text-sm font-medium text-white">Key Value Map Name</label>
                                         <input
@@ -3107,7 +3182,10 @@ ${declaredResources.map((r, idx) => {
                                                     <input
                                                         type="checkbox"
                                                         checked={kvmConfig.apikeyAuthFlag}
-                                                        onChange={(e) => setKvmConfig(prev => ({ ...prev, apikeyAuthFlag: e.target.checked }))}
+                                                        onChange={(e) => {
+                                                            kvmAuthTouchedRef.current = true;
+                                                            setKvmConfig(prev => ({ ...prev, apikeyAuthFlag: e.target.checked }));
+                                                        }}
                                                         className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
                                                     />
                                                     <span className="text-white text-sm">API Key</span>
@@ -3129,7 +3207,10 @@ ${declaredResources.map((r, idx) => {
                                                 <label className="text-xs text-slate-400">Auth Mechanism</label>
                                                 <select
                                                     value={kvmConfig.authMechanism}
-                                                    onChange={(e) => setKvmConfig(prev => ({ ...prev, authMechanism: e.target.value }))}
+                                                    onChange={(e) => {
+                                                        kvmAuthTouchedRef.current = true;
+                                                        setKvmConfig(prev => ({ ...prev, authMechanism: e.target.value }));
+                                                    }}
                                                     className="mt-1 w-full rounded-lg border border-[#2a3550] bg-[#0f1117] px-2 py-1.5 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
                                                 >
                                                     {AUTH_MECHANISM_OPTIONS.map((opt) => (
@@ -3159,17 +3240,21 @@ ${declaredResources.map((r, idx) => {
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            )}
+                            </div>
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
-                        <Button variant="outline" onClick={closeCreateProxyModal}>Cancel</Button>
+                        <Button variant="outline" disabled={creatingProxy} onClick={closeCreateProxyModal}>Cancel</Button>
                         <Button
+                            disabled={creatingProxy}
                             onClick={proxyBasePath === "/gateway" ? handleContinueToDeployMode : createProxy}
                             className="bg-[#ff5b1f] hover:bg-[#ff6b36]"
                         >
-                            {proxyBasePath === "/gateway" ? "Continue" : "Create"}
+                            {creatingProxy ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                proxyBasePath === "/gateway" ? "Continue" : "Create"
+                            )}
                         </Button>
                     </div>
                     </>
@@ -3202,12 +3287,17 @@ ${declaredResources.map((r, idx) => {
                         </div>
                     </div>
                     <div className="flex-shrink-0 flex justify-end gap-3 px-6 py-4 border-t border-[#27314e] bg-[#111520]">
-                        <Button variant="outline" onClick={() => setDeployModeStep(false)}>Back to Customize</Button>
+                        <Button variant="outline" disabled={creatingProxy} onClick={() => setDeployModeStep(false)}>Back to Customize</Button>
                         <Button
+                            disabled={creatingProxy}
                             onClick={deployMode === "cicd" ? handleContinueToCicd : createProxy}
                             className="bg-[#ff5b1f] hover:bg-[#ff6b36]"
                         >
-                            {deployMode === "cicd" ? "Continue to Pipeline Setup" : "Create Proxy"}
+                            {creatingProxy ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                deployMode === "cicd" ? "Continue to Pipeline Setup" : "Create Proxy"
+                            )}
                         </Button>
                     </div>
                     </>

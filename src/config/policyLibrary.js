@@ -109,6 +109,34 @@ const REQUIRED_POLICY_BODY = {
   Quota: () => `<Interval>1</Interval>
   <TimeUnit>minute</TimeUnit>
   <Allow count="100"/>`,
+  // AssignMessage is schema-valid with no body at all, but a no-op policy is a
+  // confusing default to hand back — this sets a harmless marker header instead,
+  // so the effect of attaching it is visible without any further edits.
+  AssignMessage: () => `<AssignTo createNew="false" type="response"/>
+  <Set>
+    <Headers>
+      <Header name="X-Policy-Applied">AssignMessage</Header>
+    </Headers>
+  </Set>`,
+  // ExtractVariables needs a Source and at least one extraction rule to do
+  // anything useful; deploy-safe default that reads the resource path.
+  ExtractVariables: () => `<Source>request</Source>
+  <VariablePrefix>extracted</VariablePrefix>
+  <URIPath>
+    <Pattern ignoreCase="true">/{resource}</Pattern>
+  </URIPath>`,
+  // StatisticsCollector requires at least one <Statistic ref="..."> child —
+  // omitting it fails bundle import ("Element 'Statistics' is missing").
+  StatisticsCollector: () => `<Statistics>
+    <Statistic name="ai_cost" ref="request.header.x-ai-cost" type="integer"/>
+  </Statistics>`,
+  // MessageLogging without a target (Syslog/CloudLogging) does nothing useful;
+  // Syslog is the only target Apigee X/hybrid supports, so default to one.
+  MessageLogging: () => `<Syslog>
+    <Message>{request.verb} {request.uri} {response.status.code}</Message>
+    <Host>localhost</Host>
+    <Port>514</Port>
+  </Syslog>`,
 };
 
 // A Javascript policy is schema-invalid without a <ResourceURL> pointing to a

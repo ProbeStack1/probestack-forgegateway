@@ -18,49 +18,49 @@ export const Framework = ({showHeader = true}) => {
     },
     {
       id: 3,
-      name: "Apigee Linting (Standard)",
+      name: "Linting (Standard)",
       githubLocation: "https://github.com/ForgeCrux/apigee-linting-standard.git",
       url: "https://probestack.io/apigee-linting-standard",
     },
     {
       id: 4,
-      name: "Apigee Linting (Custom)",
+      name: "Linting (Custom)",
       githubLocation: "https://github.com/ForgeCrux/apigee-linting-custom.git",
       url: "https://probestack.io/apigee-linting-custom",
     },
     {
       id: 5,
-      name: "Apigee CORS",
+      name: "CORS",
       githubLocation: "https://github.com/ForgeCrux/apigee-cors.git",
       url: "https://probestack.io/apigee-cors",
     },
     {
       id: 6,
-      name: "Apigee Enterprise Logging",
+      name: "Enterprise Logging",
       githubLocation: "https://github.com/ForgeCrux/apigee-logging.git",
       url: "https://probestack.io/apigee-logging",
     },
     {
       id: 7,
-      name: "Apigee Security (API Key, Oauth2.0, JWT, OIDC, DPoP, mTLS)",
+      name: "Security (API Key, Oauth2.0, JWT, OIDC, DPoP, mTLS)",
       githubLocation: "https://github.com/ForgeCrux/apigee-security.git",
       url: "https://probestack.io/apigee-security",
     },
     {
       id: 8,
-      name: "Apigee Error Handling",
+      name: "Error Handling",
       githubLocation: "https://github.com/ForgeCrux/apigee-error-handling.git",
       url: "https://probestack.io/apigee-error-handling",
     },
     {
       id: 9,
-      name: "Apigee Traffic Management",
+      name: "Traffic Management",
       githubLocation: "https://github.com/ForgeCrux/apigee-traffic-management.git",
       url: "https://probestack.io/apigee-traffic-management",
     },
     {
       id: 10,
-      name: "Apigee Transformation",
+      name: "Transformation",
       githubLocation: "https://github.com/ForgeCrux/apigee-transformation.git",
       url: "https://probestack.io/apigee-transformation",
     },
@@ -90,7 +90,7 @@ export const Framework = ({showHeader = true}) => {
         <div className="mb-2">
           <h1 className="text-3xl font-bold text-foreground mb-2">Framework</h1>
           <p className="text-muted-foreground">
-            Manage API/Apigee X framework configurations, GitHub locations and test url.
+            Manage API framework configurations, GitHub locations and test url.
           </p>
         </div>
 

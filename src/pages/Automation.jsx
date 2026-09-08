@@ -11,7 +11,7 @@ export const Automation = ({showHeader = true}) => {
     },
     {
       id: 2,
-      name: "Apigee SCM Onboarding Pipeline",
+      name: "SCM Onboarding Pipeline",
       githubLocation: "https://github.com/ForgeCrux/apigee-scm-onboarding-pipeline.git",
       url: "https://probestack.io/apigee-scm-onboarding-pipeline",
     },
@@ -29,26 +29,26 @@ export const Automation = ({showHeader = true}) => {
     },
     {
       id: 5,
-      name: "Apigee CICD Pipeline (Edge/X)",
+      name: "CICD Pipeline (Edge/X)",
       githubLocation: "https://github.com/ForgeCrux/apigee-cicd-pipeline.git",
       url: "https://probestack.io/apigee-cicd-pipeline",
     },
     {
       id: 6,
-      name: "Apigee CICD Pipeline (Edge/X)",
+      name: "CICD Pipeline (Edge/X)",
       githubLocation: "https://github.com/ForgeCrux/apigee-cicd-pipeline.git",
       url: "https://probestack.io/apigee-cicd-pipeline",
     },
     {
       id: 7,
-      name: "Apigee Oneclick Deploymnet",
+      name: "Oneclick Deploymnet",
       githubLocation: "https://github.com/ForgeCrux/apigee-deployment-pipeline.git",
       url: "https://probestack.io/apigee-deployment-pipeline",
     },
     
     {
       id: 8,
-      name: "API/Apigee BU Onboarding Pipeline",
+      name: "API BU Onboarding Pipeline",
       githubLocation: "https://github.com/ForgeCrux/api-bu-onboarding-pipeline.git",
       url: "https://probestack.io/api-bu-onboarding-pipeline",
     },
@@ -78,7 +78,7 @@ export const Automation = ({showHeader = true}) => {
         <div className="mb-2">
           <h1 className="text-3xl font-bold text-foreground mb-2">Automation</h1>
           <p className="text-muted-foreground">
-            Manage API/Apigee automation resources, GitHub locations and test pipeline urls.
+            Manage API automation resources, GitHub locations and test pipeline urls.
           </p>
         </div>
         <Card>

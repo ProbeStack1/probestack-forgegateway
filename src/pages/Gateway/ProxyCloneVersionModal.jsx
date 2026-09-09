@@ -6,23 +6,25 @@
 // (version → a new revision of the existing proxy, Apigee auto-increments the number).
 // This works for every proxy in the catalog, not just ones created through the ForgeSphere
 // onboarding wizard. Mirrors forgesphere-api-lifecycle's clone/version dialog:
-//   - shows the source API's onboarding details (when it has a ForgeSphere lifecycle record)
 //   - Select API step (source is fixed to whichever proxy the user clicked; the new name
 //     defaults to "clone-<original>")
+//   - Onboarding Mapping: Business Unit → Project → Application, the same hierarchy
+//     GatewayContextSelector and the Create Proxy dialog already source from
+//     getBusinessUnits/getProjects/getApplications — picks which onboarding context this
+//     clone/version's audit trail and KVM entry get tagged with
 //   - shows the existing base path and requires the user to edit it before cloning
 //   - after the new bundle is generated/imported, opens it straight in the Proxy Editor
 //   - writes/refreshes an "auth-config" Key Value Map entry for the new proxy
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Copy, GitBranch, Loader2, Building2, Users, User, Mail, Globe, Info } from "lucide-react";
+import { X, Copy, GitBranch, Loader2, Building2, FolderKanban, LayoutGrid, User, Mail } from "lucide-react";
 import JSZip from "jszip";
 import { fetchApigeeToken } from "../../services/apigeeToken";
-import { getTrackingHeaders, getFallbackOnboardingId, loadApigeeOnboardingOptions } from "../Apigee/components/apigeeTracking";
-import OnboardingCascadeSelect from "../Apigee/components/OnboardingCascadeSelect";
+import { getTrackingHeaders, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
+import { getBusinessUnits, getProjects, getApplications } from "../../http-service/onboardingApi";
 import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
 
 const APIGEE_WRAPPER_BASE = "https://forgegateway.probestack.io/apigee-wrapper";
-const ONBOARDING_RESOURCE_URL = (resourceId) => `https://forgegateway.probestack.io/onboarding/v1/api/onboarding/resources/${resourceId}`;
 const AUTH_CONFIG_KVM_NAME = "auth-config";
 
 // Apigee error responses are a JSON envelope buried inside the fetch response's text body —
@@ -156,45 +158,23 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const [onboarding, setOnboarding] = useState(null);
-  const [onboardingLoading, setOnboardingLoading] = useState(false);
-  const [onboardingError, setOnboardingError] = useState("");
+  // Onboarding mapping for this clone/version — the same Business Unit → Project →
+  // Application hierarchy GatewayContextSelector and the Create Proxy dialog already
+  // source from getBusinessUnits/getProjects/getApplications, cascaded the same way.
+  const [hierarchyBUs, setHierarchyBUs] = useState([]);
+  const [loadingHierarchyBUs, setLoadingHierarchyBUs] = useState(false);
+  const [hierarchyProjects, setHierarchyProjects] = useState([]);
+  const [loadingHierarchyProjects, setLoadingHierarchyProjects] = useState(false);
+  const [hierarchyApplications, setHierarchyApplications] = useState([]);
+  const [loadingHierarchyApplications, setLoadingHierarchyApplications] = useState(false);
 
-  // When the proxy has no auto-detected ForgeSphere lifecycle record (e.g. it was
-  // imported straight into Apigee), let the user pick one manually from the same
-  // Business Unit → Team → Application ID hierarchy used everywhere else in this app
-  // to link a resource to onboarding context (see OnboardingCascadeSelect).
-  const [manualOnboardingOptions, setManualOnboardingOptions] = useState([]);
-  const [loadingManualOnboardingOptions, setLoadingManualOnboardingOptions] = useState(false);
-  const [manualOnboardingError, setManualOnboardingError] = useState("");
-  const [selectedManualOnboardingId, setSelectedManualOnboardingId] = useState("");
-  const [selectedManualOption, setSelectedManualOption] = useState(null);
+  const [selectedBUId, setSelectedBUId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedApplicationId, setSelectedApplicationId] = useState("");
 
-  // Shared by both paths — the auto-detected lifecycle record and a manually-picked
-  // onboarding option resolve to the same "resources/{id}" onboarding endpoint.
-  const loadOnboardingDetails = async (resourceId) => {
-    if (!resourceId) { setOnboarding(null); return; }
-    setOnboardingLoading(true);
-    setOnboardingError("");
-    try {
-      const token = await fetchApigeeToken();
-      const res = await fetch(ONBOARDING_RESOURCE_URL(resourceId), { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setOnboarding(data?.data || data);
-    } catch (err) {
-      setOnboardingError(err.message || "Failed to load onboarding details");
-      setOnboarding(null);
-    } finally {
-      setOnboardingLoading(false);
-    }
-  };
-
-  const handleManualOnboardingChange = (onboardingId, option) => {
-    setSelectedManualOnboardingId(onboardingId);
-    setSelectedManualOption(option);
-    loadOnboardingDetails(option?.microserviceId);
-  };
+  const selectedBU = hierarchyBUs.find((bu) => bu.id === selectedBUId) || null;
+  const selectedProject = hierarchyProjects.find((p) => p.id === selectedProjectId) || null;
+  const selectedApplication = hierarchyApplications.find((a) => a.id === selectedApplicationId) || null;
 
   useEffect(() => {
     if (!open || !proxy || !org) return;
@@ -206,13 +186,10 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
     setError("");
     setExistingBasePath("");
     setNewBasePath("");
-    setOnboarding(null);
-    setOnboardingError("");
     setLoadingDefaults(true);
-    setManualOnboardingOptions([]);
-    setManualOnboardingError("");
-    setSelectedManualOnboardingId("");
-    setSelectedManualOption(null);
+    setSelectedBUId("");
+    setSelectedProjectId("");
+    setSelectedApplicationId("");
 
     (async () => {
       try {
@@ -229,42 +206,39 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       }
     })();
 
-    const microserviceId = proxy?.lifecycle?.microserviceId;
-    if (microserviceId) {
-      loadOnboardingDetails(microserviceId);
-    } else {
-      // No lifecycle record to auto-resolve — offer the same Business Unit → Team →
-      // Application ID picker used throughout this app to link a resource to onboarding
-      // context, instead of just saying "no onboarding record" and stopping there.
-      setLoadingManualOnboardingOptions(true);
-      loadApigeeOnboardingOptions()
-        .then((options) => setManualOnboardingOptions(options || []))
-        .catch((err) => setManualOnboardingError(err.message || "Failed to load onboarding options"))
-        .finally(() => setLoadingManualOnboardingOptions(false));
-    }
+    setLoadingHierarchyBUs(true);
+    getBusinessUnits(0, 200)
+      .then((list) => setHierarchyBUs(list || []))
+      .catch((err) => { console.error("Failed to load business units", err); setHierarchyBUs([]); })
+      .finally(() => setLoadingHierarchyBUs(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, proxy?.name, mode, org]);
 
+  // Business Unit → Projects (same client-side filter GatewayContextSelector uses)
+  useEffect(() => {
+    if (!selectedBUId) { setHierarchyProjects([]); return; }
+    let cancelled = false;
+    setLoadingHierarchyProjects(true);
+    getProjects(0, 200)
+      .then((list) => { if (!cancelled) setHierarchyProjects((list || []).filter((p) => p.businessUnitId === selectedBUId)); })
+      .catch((err) => { console.error("Failed to load projects", err); if (!cancelled) setHierarchyProjects([]); })
+      .finally(() => { if (!cancelled) setLoadingHierarchyProjects(false); });
+    return () => { cancelled = true; };
+  }, [selectedBUId]);
+
+  // Project → Applications (same call the Create Proxy dialog uses)
+  useEffect(() => {
+    if (!selectedProjectId) { setHierarchyApplications([]); return; }
+    let cancelled = false;
+    setLoadingHierarchyApplications(true);
+    getApplications({ projectId: selectedProjectId, size: 100 })
+      .then((list) => { if (!cancelled) setHierarchyApplications(list || []); })
+      .catch((err) => { console.error("Failed to load applications", err); if (!cancelled) setHierarchyApplications([]); })
+      .finally(() => { if (!cancelled) setLoadingHierarchyApplications(false); });
+    return () => { cancelled = true; };
+  }, [selectedProjectId]);
+
   if (!open || !proxy) return null;
-
-  const onboardingRecord = onboarding?.onboarding;
-  const microservice = onboarding?.resource?.microservice;
-
-  // The Business Unit / Team / Application picked in the cascade select already carries
-  // that data straight off the option (it's exactly what populated the dropdowns), so show
-  // it immediately rather than waiting on — or blanking out on failure of — a further
-  // "/resources/{id}" round trip. That extra fetch (via loadOnboardingDetails) still runs to
-  // fill in details the option itself doesn't carry, like Owner/Owner Email.
-  const displayBusinessUnit = onboardingRecord?.businessUnit || selectedManualOption?.businessUnit;
-  const displayTeam = onboardingRecord?.teamName || selectedManualOption?.teamName;
-  const displayApplication = onboardingRecord?.applicationName || microservice?.applicationName || selectedManualOption?.applicationName;
-  const displayApplicationId = selectedManualOption?.applicationId;
-  const displayOwner = onboardingRecord?.projectOwner;
-  const displayOwnerEmail = onboardingRecord?.ownerEmail;
-  const displayApiName = microservice?.apiName;
-  const hasOnboardingContext = Boolean(
-    proxy?.lifecycle?.microserviceId || selectedManualOption || displayBusinessUnit || displayTeam || displayApplication
-  );
 
   const handleSubmit = async () => {
     if (isClone && !newName.trim()) { setError("New proxy name is required."); return; }
@@ -317,10 +291,16 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       const newRevision = importResult.revision || "1";
 
       const tracking = {
-        onboardingId: proxy.lifecycle?.onboardingId || selectedManualOption?.onboardingId || getFallbackOnboardingId(),
-        microserviceId: proxy.lifecycle?.microserviceId || selectedManualOption?.microserviceId,
-        applicationId: selectedManualOption?.applicationId,
-        applicationName: selectedManualOption?.applicationName,
+        // Legacy onboarding-context identity (only present for proxies created through
+        // the ForgeSphere lifecycle wizard) — independent of the Business Unit/Project/
+        // Application hierarchy below, same distinction getTrackingHeaders itself draws.
+        onboardingId: proxy.lifecycle?.onboardingId || getFallbackOnboardingId(),
+        microserviceId: proxy.lifecycle?.microserviceId,
+        // Business hierarchy — which Project/Application this clone/version maps to.
+        projectId: selectedProject?.id,
+        projectName: selectedProject?.name,
+        applicationId: selectedApplication?.id,
+        applicationName: selectedApplication?.name,
       };
 
       // Audit trail — best-effort, mirrors the existing "Create API" recording pattern
@@ -447,42 +427,64 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
             </div>
           </div>
 
-          {/* Onboarding Details — auto-resolved from the proxy's ForgeSphere lifecycle
-              record when it has one; otherwise pick one from the same Business Unit →
-              Team → Application ID hierarchy used elsewhere in this app. Once a Business
-              Unit/Team/Application is picked, its details show immediately — they're
-              already on the selected option, no extra round trip needed for those. */}
+          {/* Onboarding mapping — Business Unit → Project → Application, the same
+              hierarchy GatewayContextSelector and Create Proxy already source from
+              getBusinessUnits/getProjects/getApplications. Picks which onboarding
+              context this clone/version's audit trail and KVM entry get tagged with. */}
           <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Onboarding Details</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Onboarding Mapping</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 flex items-center gap-1.5"><Building2 className="h-3 w-3" /> Business Unit</label>
+                <select
+                  value={selectedBUId}
+                  onChange={(e) => { setSelectedBUId(e.target.value); setSelectedProjectId(""); setSelectedApplicationId(""); }}
+                  disabled={loadingHierarchyBUs}
+                  className="w-full px-3 py-2 rounded-lg border border-[#2a3550] bg-[#0f172a]/50 text-white text-sm focus:outline-none focus:border-[#ff5b1f] disabled:opacity-50"
+                >
+                  <option value="">{loadingHierarchyBUs ? "Loading…" : "Select Business Unit"}</option>
+                  {hierarchyBUs.map((bu) => (
+                    <option key={bu.id} value={bu.id}>{bu.displayName || bu.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 flex items-center gap-1.5"><FolderKanban className="h-3 w-3" /> Project</label>
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => { setSelectedProjectId(e.target.value); setSelectedApplicationId(""); }}
+                  disabled={!selectedBUId || loadingHierarchyProjects}
+                  className="w-full px-3 py-2 rounded-lg border border-[#2a3550] bg-[#0f172a]/50 text-white text-sm focus:outline-none focus:border-[#ff5b1f] disabled:opacity-50"
+                >
+                  <option value="">{!selectedBUId ? "Select a Business Unit first" : loadingHierarchyProjects ? "Loading…" : "Select Project"}</option>
+                  {hierarchyProjects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 flex items-center gap-1.5"><LayoutGrid className="h-3 w-3" /> Application</label>
+                <select
+                  value={selectedApplicationId}
+                  onChange={(e) => setSelectedApplicationId(e.target.value)}
+                  disabled={!selectedProjectId || loadingHierarchyApplications}
+                  className="w-full px-3 py-2 rounded-lg border border-[#2a3550] bg-[#0f172a]/50 text-white text-sm focus:outline-none focus:border-[#ff5b1f] disabled:opacity-50"
+                >
+                  <option value="">{!selectedProjectId ? "Select a Project first" : loadingHierarchyApplications ? "Loading…" : "Select Application"}</option>
+                  {hierarchyApplications.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-            {!proxy?.lifecycle?.microserviceId && (
-              <OnboardingCascadeSelect
-                value={selectedManualOnboardingId}
-                onChange={handleManualOnboardingChange}
-                options={manualOnboardingOptions}
-                isLoading={loadingManualOnboardingOptions}
-                teamLabel="Project"
-                selectClassName="w-full bg-[#0f172a]/50 border border-[#2a3550] rounded-lg px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:border-[#ff5b1f]"
-              />
-            )}
-            {manualOnboardingError && (
-              <p className="text-[11px] text-red-400">Couldn't load onboarding options ({manualOnboardingError}).</p>
-            )}
-
-            {hasOnboardingContext && (
+            {selectedApplication && (
               <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <InfoField icon={Building2} label="Business Unit" value={displayBusinessUnit} />
-                <InfoField icon={Users} label="Project" value={displayTeam} />
-                <InfoField icon={Globe} label="Application" value={displayApplication} />
-                <InfoField icon={Info} label="Application ID" value={displayApplicationId} />
-                <InfoField icon={User} label="Owner" value={displayOwner} />
-                <InfoField icon={Mail} label="Owner Email" value={displayOwnerEmail} />
-                {displayApiName && <InfoField icon={Info} label="API Name" value={displayApiName} />}
-                {onboardingLoading && (
-                  <div className="col-span-full flex items-center gap-2 text-[11px] text-slate-500">
-                    <Loader2 className="h-3 w-3 animate-spin" /> Loading additional details…
-                  </div>
-                )}
+                <InfoField icon={Building2} label="Business Unit" value={selectedBU?.displayName || selectedBU?.name} />
+                <InfoField icon={FolderKanban} label="Project" value={selectedProject?.name} />
+                <InfoField icon={LayoutGrid} label="Application" value={selectedApplication?.name} />
+                <InfoField icon={User} label="Owner" value={selectedApplication?.ownerName} />
+                <InfoField icon={Mail} label="Owner Email" value={selectedApplication?.ownerEmail} />
               </div>
             )}
           </div>

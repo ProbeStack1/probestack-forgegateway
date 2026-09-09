@@ -151,7 +151,7 @@ const AUTH_MECHANISM_OPTIONS = [
     { value: "customAuthFlag", label: "Custom Auth" },
 ];
 const defaultKvmConfig = {
-    // Every proxy always gets its Key Value Map entry verified/created — this is no
+    // Every proxy always gets its Config Map entry verified/created — this is no
     // longer an opt-in checkbox, so `enabled` stays true for the dialog's whole
     // lifetime (nothing in the UI can turn it off anymore).
     enabled: true,
@@ -436,7 +436,7 @@ export const ProxiesView = ({ showMessage }) => {
         accessType: "private", autoApprove: false,
     });
 
-    // Security & Traffic Configuration — optionally writes a Key Value Map entry
+    // Security & Traffic Configuration — optionally writes a Config Map entry
     // (named after the new API) into the dialog's own Environment, in the same
     // env-scoped KVM ("Config Map") the Gateway Environments page manages. Most of
     // its flags are derived from the Attach Frameworks selections above (see
@@ -1045,7 +1045,7 @@ export const ProxiesView = ({ showMessage }) => {
             body: JSON.stringify({ name: kvmName, encrypted: true }),
         });
         if (!createRes.ok && createRes.status !== 409) {
-            throw new Error(`Failed to create Key Value Map "${kvmName}": ${createRes.status} ${await createRes.text()}`);
+            throw new Error(`Failed to create Config Map "${kvmName}": ${createRes.status} ${await createRes.text()}`);
         }
     };
 
@@ -1061,9 +1061,9 @@ export const ProxiesView = ({ showMessage }) => {
         if (createRes.status === 409 || createRes.status === 400) {
             const updateRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.UPDATE(org, env, kvmName, entryName), { method: "PUT", headers, body });
             if (updateRes.ok) return;
-            throw new Error(`Failed to update Key Value Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
+            throw new Error(`Failed to update Config Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
         }
-        throw new Error(`Failed to create Key Value Map entry "${entryName}": ${createRes.status} ${await createRes.text()}`);
+        throw new Error(`Failed to create Config Map entry "${entryName}": ${createRes.status} ${await createRes.text()}`);
     };
 
     // Filtering logic (unchanged)
@@ -1819,10 +1819,10 @@ ${declaredResources.map((r, idx) => {
                     const signals = deriveSecurityKvmSignals(modal.frameworkAttachment, modal.backendFrameworkAttachment);
                     await ensureKvmExists(effectiveOrg, createProxyEnv, kvmName, token, kvmTracking);
                     await upsertKvmEntry(effectiveOrg, createProxyEnv, kvmName, modal.name, JSON.stringify(buildSecurityKvmValue(kvmConfig, signals)), token, kvmTracking);
-                    showMessage(`Key Value Map entry "${modal.name}" created in "${kvmName}".`, "success");
+                    showMessage(`Config Map entry "${modal.name}" created in "${kvmName}".`, "success");
                 } catch (err) {
-                    console.error("Failed to create Key Value Map entry for new API", err);
-                    showMessage(`API created, but Key Value Map setup failed: ${err.message}`, "error");
+                    console.error("Failed to create Config Map entry for new API", err);
+                    showMessage(`API created, but Config Map setup failed: ${err.message}`, "error");
                 }
             }
 
@@ -3120,26 +3120,26 @@ ${declaredResources.map((r, idx) => {
                                 )}
                             </div>
                         </div>
-                        {/* Security & Traffic Configuration — always writes a Key Value Map
+                        {/* Security & Traffic Configuration — always writes a Config Map
                             entry (keyed by this API's name) into the dialog's own Environment,
                             the same "Config Map" (KVM_ENV_LEVEL) the Gateway Environments page
                             manages — so an FC-* framework's shared flow can look this up at
                             runtime via apiproxy.name to decide which auth/traffic rules apply.
                             Mandatory for every proxy (no opt-out toggle): createProxy() first
-                            verifies the Key Value Map exists, then creates/updates the entry —
+                            verifies the Config Map exists, then creates/updates the entry —
                             hence "Verify", not "Create". Security/CORS/Error-Handling/Traffic/
                             Transformation are derived from the Attach Frameworks selections
                             above, not re-entered here. */}
                         <div className="space-y-3 border-t border-[#27314e] pt-4">
                             <div className="flex items-center gap-2">
                                 <CheckCircle className="h-4 w-4 text-emerald-400 shrink-0" />
-                                <span className="text-sm font-medium text-white">Verify Key Value Map entry (Security &amp; Traffic Configuration)</span>
+                                <span className="text-sm font-medium text-white">Verify Config Map entry (Security &amp; Traffic Configuration)</span>
                                 <span className="text-xs text-slate-500">— required for every proxy</span>
                             </div>
 
                             <div className="space-y-4 rounded-lg border border-[#2a3550] bg-[#0f1117]/40 p-4">
                                     <div>
-                                        <label className="text-sm font-medium text-white">Key Value Map Name</label>
+                                        <label className="text-sm font-medium text-white">Config Map Name</label>
                                         <input
                                             type="text"
                                             value={kvmConfig.kvmName}

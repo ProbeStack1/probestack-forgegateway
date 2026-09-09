@@ -125,7 +125,7 @@ const parseTargetEndpointXml = (xmlString) => {
     return { name, url, targetServer };
 };
 
-// KVM policies are the only place a proxy names a Key Value Map — Apigee's revision JSON
+// KVM policies are the only place a proxy names a Config Map — Apigee's revision JSON
 // only lists policy names, not their XML config, so this has to come out of the bundle.
 const parseKvmNameFromPolicyXml = (xmlString) => {
     const doc = xmlParser.parseFromString(xmlString, "application/xml");

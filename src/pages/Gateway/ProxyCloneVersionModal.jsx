@@ -14,7 +14,7 @@
 //     clone/version's audit trail and KVM entry get tagged with
 //   - shows the existing base path and requires the user to edit it before cloning
 //   - after the new bundle is generated/imported, opens it straight in the Proxy Editor
-//   - writes/refreshes an "auth-config" Key Value Map entry for the new proxy
+//   - writes/refreshes an "auth-config" Config Map entry for the new proxy
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Copy, GitBranch, Loader2, Building2, FolderKanban, LayoutGrid, User, Mail } from "lucide-react";
@@ -151,7 +151,7 @@ const ensureKvmExists = async (org, env, kvmName, token, tracking) => {
     body: JSON.stringify({ name: kvmName, encrypted: true }),
   });
   if (!createRes.ok && createRes.status !== 409) {
-    throw new Error(`Failed to create Key Value Map "${kvmName}": ${createRes.status} ${await createRes.text()}`);
+    throw new Error(`Failed to create Config Map "${kvmName}": ${createRes.status} ${await createRes.text()}`);
   }
 };
 
@@ -172,9 +172,9 @@ const upsertKvmEntry = async (org, env, kvmName, entryName, entryValue, token, t
   if (createRes.status === 409 || createRes.status === 400) {
     const updateRes = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.UPDATE(org, env, kvmName, entryName), { method: "PUT", headers, body });
     if (updateRes.ok) return;
-    throw new Error(`Failed to update Key Value Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
+    throw new Error(`Failed to update Config Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
   }
-  throw new Error(`Failed to create Key Value Map entry "${entryName}": ${createRes.status} ${await createRes.text()}`);
+  throw new Error(`Failed to create Config Map entry "${entryName}": ${createRes.status} ${await createRes.text()}`);
 };
 
 const InfoField = ({ icon: Icon, label, value }) => (
@@ -196,7 +196,6 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
   const [existingBasePath, setExistingBasePath] = useState("");
   const [newBasePath, setNewBasePath] = useState("");
   const [targetEnv, setTargetEnv] = useState("");
-  const [deployAfterImport, setDeployAfterImport] = useState(true);
   const [openInEditorAfter, setOpenInEditorAfter] = useState(true);
 
   const [loadingDefaults, setLoadingDefaults] = useState(false);
@@ -231,7 +230,6 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
     setNewName(isClone ? `clone-${proxy.name}` : proxy.name);
     setVersion("");
     setTargetEnv("");
-    setDeployAfterImport(true);
     setOpenInEditorAfter(true);
     setError("");
     setExistingBasePath("");
@@ -300,6 +298,7 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       setError("Edit the base path before cloning — it can't stay the same as the source proxy's, or deploying the clone will conflict with it.");
       return;
     }
+    if (!targetEnv) { setError("Select an Environment — every Clone/Version deploys."); return; }
 
     setSubmitting(true);
     setError("");
@@ -388,10 +387,11 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
         // Audit failures shouldn't block the user from seeing the clone/version succeed.
       }
 
-      // "auth-config" Key Value Map — carry the source proxy's entry (if any) forward onto
+      // "auth-config" Config Map — carry the source proxy's entry (if any) forward onto
       // the new proxy/revision, keyed by proxy name, same convention the Create Proxy
-      // dialog uses for its own "security-config" KVM.
-      if (targetEnv) {
+      // dialog uses for its own "security-config" KVM. Environment is required (no "skip
+      // deployment" option), so this and the deploy below always run.
+      {
         try {
           await ensureKvmExists(org, targetEnv, AUTH_CONFIG_KVM_NAME, token, tracking);
           const sourceValueRaw = await getKvmEntry(org, targetEnv, AUTH_CONFIG_KVM_NAME, proxy.name, token, tracking);
@@ -407,13 +407,13 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
             updatedAt: new Date().toISOString(),
           };
           await upsertKvmEntry(org, targetEnv, AUTH_CONFIG_KVM_NAME, targetName, JSON.stringify(mergedValue), token, tracking);
-          showMessage?.(`"${AUTH_CONFIG_KVM_NAME}" Key Value Map entry set for "${targetName}".`, "success");
+          showMessage?.(`"${AUTH_CONFIG_KVM_NAME}" Config Map entry set for "${targetName}".`, "success");
         } catch (err) {
           showMessage?.(`${isClone ? "Clone" : "Version"} succeeded, but the "${AUTH_CONFIG_KVM_NAME}" KVM entry failed: ${err.message}`, "error");
         }
       }
 
-      if (targetEnv && deployAfterImport) {
+      {
         try {
           const deployUrl = `https://apigee.googleapis.com/v1/organizations/${encodeURIComponent(org)}/environments/${encodeURIComponent(targetEnv)}/apis/${encodeURIComponent(targetName)}/revisions/${newRevision}/deployments?override=true`;
           const deployRes = await fetchWithRetry(deployUrl, {
@@ -612,34 +612,21 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
               </p>
             )}
 
-            {environments.length > 0 && (
-              <div className="space-y-2">
-                <label className="text-xs text-gray-400">Environment</label>
-                <select
-                  value={targetEnv}
-                  onChange={(e) => setTargetEnv(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-lg border border-[#2a3550] bg-[#0f172a]/50 text-white text-sm focus:outline-none focus:border-[#ff5b1f]"
-                >
-                  <option value="">Skip environment setup (no KVM entry, no deploy)</option>
-                  {environments.map((env) => (
-                    <option key={env} value={env}>{env}</option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-500">Used to create/refresh the "{AUTH_CONFIG_KVM_NAME}" Key Value Map entry, and optionally to deploy the new {isClone ? "proxy" : "revision"}.</p>
-              </div>
-            )}
-
-            {targetEnv && (
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={deployAfterImport}
-                  onChange={(e) => setDeployAfterImport(e.target.checked)}
-                  className="rounded border-[#2a3550] bg-[#1a1f2e] text-[#ff5b1f] focus:ring-[#ff5b1f]"
-                />
-                Deploy the new {isClone ? "proxy" : "revision"} to "{targetEnv}" immediately
-              </label>
-            )}
+            <div className="space-y-2">
+              <label className="text-xs text-gray-400">Environment *</label>
+              <select
+                value={targetEnv}
+                onChange={(e) => setTargetEnv(e.target.value)}
+                disabled={environments.length === 0}
+                className="w-full px-4 py-2.5 rounded-lg border border-[#2a3550] bg-[#0f172a]/50 text-white text-sm focus:outline-none focus:border-[#ff5b1f] disabled:opacity-50"
+              >
+                <option value="">{environments.length === 0 ? "No environments available" : "Select environment"}</option>
+                {environments.map((env) => (
+                  <option key={env} value={env}>{env}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">The new {isClone ? "proxy" : "revision"} deploys here and its "{AUTH_CONFIG_KVM_NAME}" Config Map entry is written here.</p>
+            </div>
 
             <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
               <input

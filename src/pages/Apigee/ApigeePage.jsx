@@ -1018,7 +1018,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
               <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-5 space-y-4">
 
               <h2 className="text-lg font-semibold">
-                View Key Value Map
+                View Config Map
               </h2>
 
               <p className="text-sm text-gray-400">
@@ -1036,7 +1036,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-semibold">
-                    Key Value Map
+                    Config Map
                   </h3>
                   <p className="text-sm text-gray-400">
                     Use the filters to focus on the resources you want
@@ -1092,7 +1092,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
 
                   <thead className="bg-dark-800/70">
                     <tr>
-                      <th className="px-4 py-3 text-left text-gray-400">Key Value Map</th>
+                      <th className="px-4 py-3 text-left text-gray-400">Config Map</th>
                       <th className="px-4 py-3 text-left text-gray-400">Project Id</th>
                       <th className="px-4 py-3 text-left text-gray-400">Key/Secret</th>
                       <th className="px-4 py-3 text-left text-gray-400">Source</th>

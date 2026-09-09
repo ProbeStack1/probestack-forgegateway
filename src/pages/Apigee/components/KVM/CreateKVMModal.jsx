@@ -251,7 +251,7 @@ export default function CreateKVMModal({
         setSubmitError("");
 
         if (!form.organization || !form.environment || !form.name.trim()) {
-            setSubmitError("Project Id, Environment, and Key Value Map Name are required.");
+            setSubmitError("Project Id, Environment, and Config Map Name are required.");
             return;
         }
 
@@ -273,7 +273,7 @@ export default function CreateKVMModal({
             onClose();
         } catch (error) {
             console.error("Failed to create KVM", error);
-            setSubmitError(error.message || "Failed to create Key Value Map");
+            setSubmitError(error.message || "Failed to create Config Map");
         } finally {
             setIsSubmitting(false);
         }
@@ -288,10 +288,10 @@ export default function CreateKVMModal({
                 <div className="flex justify-between items-center px-6 py-4 border-b border-[#27314e] modal-header" style={{ height: "4.5rem" }}>
                     <div>
                         <h2 className="text-lg font-semibold text-white">
-                            {editData ? "Edit Key Value Map" : "Create Key Value Map"}
+                            {editData ? "Edit Config Map" : "Create Config Map"}
                         </h2>
                         <p className="text-sm text-gray-400">
-                            {!editData && "Create a Key Value Map in a few simple steps."}
+                            {!editData && "Create a Config Map in a few simple steps."}
                         </p>
                     </div>
 
@@ -370,11 +370,11 @@ export default function CreateKVMModal({
                         {/* Name */}
                         <div>
                             <label className="text-sm text-gray-400">
-                                Key Value Map Name*
+                                Config Map Name*
                             </label>
                             <input
                                 value={form.name}
-                                placeholder="Enter Key Value Map Name"
+                                placeholder="Enter Config Map Name"
                                 className={inputStyle}
                                 onChange={(e) => handleChange("name", e.target.value)}
                             />

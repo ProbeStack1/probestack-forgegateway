@@ -43,6 +43,7 @@ import { useNavigate } from "react-router-dom";
 import ViewSpecModal from "../../components/ViewSpecModal";
 import API_BASE_URL from "../../config/apiConfig";
 import ResourceAuditDetails from './ResourceAuditDetails';
+import ProxyCloneVersionModal from './ProxyCloneVersionModal';
 import { getTrackingHeaders } from "../Apigee/components/apigeeTracking";
 import JSZip from "jszip";
 
@@ -740,6 +741,14 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
             </div>
         );
     };
+    // Clone / Version this proxy directly at the Apigee bundle level (see
+    // ProxyCloneVersionModal) — works regardless of whether the proxy has a ForgeSphere
+    // onboarding record.
+    const [cloneVersionModal, setCloneVersionModal] = useState({ open: false, mode: 'cloning' });
+    const [detailsRefreshToken, setDetailsRefreshToken] = useState(0);
+    const openProxyLifecycleAction = (actionMode) => setCloneVersionModal({ open: true, mode: actionMode });
+    const closeCloneVersionModal = () => setCloneVersionModal((prev) => ({ ...prev, open: false }));
+
     const openProxyEditor = async (proxyName) => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
         try {
@@ -1607,7 +1616,7 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
         };
 
         fetchProxyDetails();
-    }, [proxy?.name]);
+    }, [proxy?.name, detailsRefreshToken]);
     // Helper: fetch zip bundle for the latest revision
     const fetchProxyBundleZip = async () => {
         if (!proxy?.name) {
@@ -2417,7 +2426,12 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                     <button onClick={() => setDeployModalOpen(true)} className="px-4 py-1.5 bg-[#ff5b1f] text-white rounded-md text-sm font-medium hover:bg-[#ff6b36]">
                         Deploy
                     </button>
-                    {/* <button onClick={onDuplicate} className="px-4 py-1.5 bg-[#1a1f2e] border border-[#2a3550] text-white rounded-md text-sm hover:bg-[#22273b]">Duplicate</button> */}
+                    <button onClick={() => openProxyLifecycleAction('cloning')} className="px-4 py-1.5 bg-[#1a1f2e] border border-[#2a3550] text-white rounded-md text-sm hover:bg-[#22273b] inline-flex items-center gap-1.5">
+                        <Copy className="h-3.5 w-3.5" /> Clone
+                    </button>
+                    <button onClick={() => openProxyLifecycleAction('versioning')} className="px-4 py-1.5 bg-[#1a1f2e] border border-[#2a3550] text-white rounded-md text-sm hover:bg-[#22273b] inline-flex items-center gap-1.5">
+                        <GitBranch className="h-3.5 w-3.5" /> New Version
+                    </button>
                     <button onClick={onDelete} className="px-4 py-1.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded-md text-sm hover:bg-red-500/20">Undeploy</button>
                 </div>
             </div>
@@ -3447,6 +3461,17 @@ export const ProxyDetailView = ({ proxy, onBack, onDeploy, onDuplicate, onDelete
                 onClose={() => { setViewSpecOpen(false); setViewSpecData(null); }}
             />
         )}
+
+        <ProxyCloneVersionModal
+            open={cloneVersionModal.open}
+            mode={cloneVersionModal.mode}
+            proxy={proxy}
+            org={selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg}
+            environments={availableEnvironments}
+            onClose={closeCloneVersionModal}
+            onSuccess={() => setDetailsRefreshToken((t) => t + 1)}
+            showMessage={showMessage}
+        />
         </>
     );
 };

@@ -14,6 +14,7 @@ import { GatewayContextSelector } from "./GatewayContextSelector";
 import JSZip from "jszip";
 import { PaginationControls } from "../../components/ui/PaginationControls";
 import CreateTargetServerModal from "../Apigee/components/TargetServer/CreateTargetServerModal";
+import ProxyCloneVersionModal from "./ProxyCloneVersionModal";
 import { getTrackingHeaders, loadApigeeOnboardingOptions, getFallbackOnboardingId } from "../Apigee/components/apigeeTracking";
 import API_BASE_URL from "../../config/apiConfig";
 import { APIGEE_ENDPOINTS } from "../../config/apigeeConfig";
@@ -1981,6 +1982,14 @@ ${declaredResources.map((r, idx) => {
         });
     };
 
+    // Clone / Version an API proxy directly at the Apigee bundle level (see
+    // ProxyCloneVersionModal) — works for every proxy in the catalog, not just ones with a
+    // ForgeSphere onboarding record.
+    const [cloneVersionModal, setCloneVersionModal] = useState({ open: false, mode: 'cloning', proxy: null });
+    const handleCloneProxy = (proxy) => setCloneVersionModal({ open: true, mode: 'cloning', proxy });
+    const handleVersionProxy = (proxy) => setCloneVersionModal({ open: true, mode: 'versioning', proxy });
+    const closeCloneVersionModal = () => setCloneVersionModal((prev) => ({ ...prev, open: false }));
+
     const checkProxyExists = async (proxyName) => {
         const effectiveOrg = selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg;
         try {
@@ -2266,8 +2275,8 @@ ${declaredResources.map((r, idx) => {
                                             <div className="flex items-center gap-2">
                                                 <button onClick={(e) => { e.stopPropagation(); handleProxySelect(proxy); }} className="text-[#4f8ef7] hover:text-[#6ca9ff]" title="View details"><Eye className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); openProxyEditor(proxy.name); }} className="text-violet-400 hover:text-violet-300" title="Open in Proxy Editor"><FileCode2 className="h-4 w-4" /></button>
-                                                <button onClick={(e) => { e.stopPropagation(); showMessage(`Clone ${proxy.name} feature coming soon`, "info"); }} className="text-emerald-400 hover:text-emerald-300" title="Clone"><Copy className="h-4 w-4" /></button>
-                                                <button onClick={(e) => { e.stopPropagation(); showMessage(`Version management for ${proxy.name} coming soon`, "info"); }} className="text-amber-400 hover:text-amber-300" title="Versioning"><GitBranch className="h-4 w-4" /></button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleCloneProxy(proxy); }} className="text-emerald-400 hover:text-emerald-300" title="Clone"><Copy className="h-4 w-4" /></button>
+                                                <button onClick={(e) => { e.stopPropagation(); handleVersionProxy(proxy); }} className="text-amber-400 hover:text-amber-300" title="Versioning"><GitBranch className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage(`Deprecate ${proxy.name} feature coming soon`, "info"); }} className="text-orange-400 hover:text-orange-500" title="Deprecate"><ArchiveIcon className="h-4 w-4" /></button>
                                                 <button onClick={(e) => { e.stopPropagation(); showMessage("Admin role is required to delete an API", "info"); }} className="text-red-400 hover:text-red-500" title="Delete"><Trash2Icon className="h-4 w-4" /></button>
                                             </div>
@@ -2284,6 +2293,18 @@ ${declaredResources.map((r, idx) => {
                 </>
             )}
             </div>
+
+            <ProxyCloneVersionModal
+                open={cloneVersionModal.open}
+                mode={cloneVersionModal.mode}
+                proxy={cloneVersionModal.proxy}
+                org={selectedOrg === "Forgesphere" ? "gen-ai-poc-onboarding" : selectedOrg}
+                environments={availableCreateEnvs}
+                onClose={closeCloneVersionModal}
+                onSuccess={() => fetchProxies()}
+                showMessage={showMessage}
+                backTo={`${proxyBasePath}/proxy`}
+            />
 
             {/* Create Proxy Modal - modified Backend section */}
             <Dialog open={createProxyModal.open} onOpenChange={(open) => {

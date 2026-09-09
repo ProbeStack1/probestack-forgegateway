@@ -122,12 +122,12 @@ async function rewriteProxyName(zip, rootPath, newName) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Apigee's Management API rate-limits aggressively (some trial/eval orgs enforce this per
-// MINUTE, not per second) — every call in this flow, not just the last one, can land on a
-// 429 once enough of them stack up. Retry with backoff (honoring Retry-After when Apigee
-// sends one) rather than surfacing "Too Many Requests" to the user on the first hit. Every
-// direct Apigee/wrapper call in this file goes through this — see calls below.
-async function fetchWithRetry(url, options, { retries = 5, baseDelayMs = 2000, maxDelayMs = 20000 } = {}) {
+// Apigee's Management API rate-limits aggressively — every call in this flow can land on a
+// 429 once enough of them stack up. Retry ONCE (honoring Retry-After when Apigee sends one)
+// rather than surfacing "Too Many Requests" to the user on the first hit — repeated retries
+// just make a real quota problem take longer to fail. Every direct Apigee/wrapper call in
+// this file goes through this — see calls below.
+async function fetchWithRetry(url, options, { retries = 1, baseDelayMs = 2000, maxDelayMs = 20000 } = {}) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, options);
     if (res.status !== 429 || attempt >= retries) return res;
@@ -316,7 +316,9 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       if (isClone) {
         const collides = await proxyExists(token, org, targetName);
         if (collides) {
-          setError(`A proxy named "${targetName}" already exists in this organization — choose a different name, or importing this bundle would add a new revision to that unrelated proxy instead of creating a clone.`);
+          const shortMessage = `"${targetName}" already exists — pick a different name.`;
+          setError(shortMessage);
+          showMessage?.(shortMessage, "error");
           setSubmitting(false);
           return;
         }

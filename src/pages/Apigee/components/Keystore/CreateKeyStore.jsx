@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { APIGEE_ENDPOINTS } from "../../../../config/apigeeConfig";
 import { apigeeApiFetch } from "../../../../services/apigeeApiService";
+import { getTrackingHeaders } from "../apigeeTracking";
+import OnboardingHierarchySelect from "../OnboardingHierarchySelect";
 import useApigeeOrgEnvironmentOptions from "../useApigeeOrgEnvironmentOptions";
+import { getApplicationDetail } from "../../../../http-service/onboardingApi";
 
 const CERT_TYPES = [
     "Certificate Only",
@@ -17,9 +20,46 @@ export default function CreateKeystore({
     onSuccess,
     organization = "",
     environment = "",
+    // Gateway specific props — same convention as CreateTargetServerModal.jsx
+    isGateway = false,
+    application = null,
 }) {
     const resolvedOrg = editData?.organization || editData?.projectId || organization || "";
     const resolvedEnv = editData?.environment || editData?.env || environment || "";
+
+    // ------------------------------------------------------------
+    // Gateway mode: Business Unit -> Project -> Application.
+    // ------------------------------------------------------------
+    const [gatewaySelection, setGatewaySelection] = useState({
+        businessUnitId: "", projectId: "", applicationId: "",
+        businessUnit: null, project: null, application: null,
+    });
+
+    useEffect(() => {
+        if (!isGateway || editData || !application?.id) return;
+        (async () => {
+            try {
+                const app = await getApplicationDetail(application.id);
+                setGatewaySelection({
+                    businessUnitId: app?.businessUnitId || "",
+                    projectId: app?.projectId || "",
+                    applicationId: application.id,
+                    businessUnit: null, project: null, application: app || null,
+                });
+            } catch (err) {
+                console.error("Failed to load application detail", err);
+            }
+        })();
+        // Only ever run this prefill once, on mount, for the create flow.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const buildTrackingContext = () => ({
+        applicationId: gatewaySelection.application?.applicationId || gatewaySelection.application?.id,
+        applicationName: gatewaySelection.application?.name,
+        projectId: gatewaySelection.project?.id || gatewaySelection.projectId,
+        projectName: gatewaySelection.project?.name,
+    });
 
     const [form, setForm] = useState({
         organization: resolvedOrg,
@@ -104,6 +144,11 @@ export default function CreateKeystore({
             return;
         }
 
+        if (isGateway && !editData && !gatewaySelection.applicationId) {
+            setSubmitError("Please select a Business Unit, Project and Application.");
+            return;
+        }
+
         // For new keystore creation, we need to create the keystore first, then optionally add alias
         setIsSubmitting(true);
         try {
@@ -115,7 +160,7 @@ export default function CreateKeystore({
                     APIGEE_ENDPOINTS.TLS_KEYSTORES.CREATE(form.organization, form.environment),
                     {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: getTrackingHeaders(buildTrackingContext()),
                         body: JSON.stringify({ name: keystoreName }),
                     }
                 );
@@ -157,7 +202,7 @@ export default function CreateKeystore({
                     ),
                     {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: getTrackingHeaders(buildTrackingContext()),
                         body: JSON.stringify(aliasPayload),
                     }
                 );
@@ -212,6 +257,18 @@ export default function CreateKeystore({
 
                 {/* Body */}
                 <div className="p-6 space-y-6 overflow-y-auto modal-body" style={{ height: "calc(100% - 9rem)" }}>
+                    {isGateway && (
+                        // Gateway mode: Business Unit -> Project -> Application, same
+                        // convention as CreateTargetServerModal.jsx/CreateKVMModal.jsx.
+                        <OnboardingHierarchySelect
+                            businessUnitId={gatewaySelection.businessUnitId}
+                            projectId={gatewaySelection.projectId}
+                            applicationId={gatewaySelection.applicationId}
+                            onChange={setGatewaySelection}
+                            required
+                            selectClassName={inputStyle}
+                        />
+                    )}
                     {/* Row 1: Environment & Keystore */}
                     <div className="grid grid-cols-2 gap-6">
                         <div>

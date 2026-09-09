@@ -1628,6 +1628,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
           isFetchingOnboardings={isFetchingOnboardings}
           defaultOnboardingId={selectedOnboardingId}
           defaultMicroserviceId={selectedMicroserviceId}
+          isGateway={!showHeader}
         />
       )}
       {isAppModal && (
@@ -1666,6 +1667,7 @@ export default function ApigeeMainPage({showHeader = true, forceTab = null, over
           editData={keystoreEditData}
           organization={projectId}
           environment={env}
+          isGateway={!showHeader}
         />
       )}
       {isTSSyncModal && (

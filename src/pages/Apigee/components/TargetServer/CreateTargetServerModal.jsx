@@ -4,8 +4,9 @@ import { APIGEE_ENDPOINTS } from "../../../../config/apigeeConfig";
 import { apigeeApiFetch } from "../../../../services/apigeeApiService";
 import { getTrackingHeaders } from "../apigeeTracking";
 import OnboardingCascadeSelect from "../OnboardingCascadeSelect";
+import OnboardingHierarchySelect from "../OnboardingHierarchySelect";
 import useApigeeOrgEnvironmentOptions from "../useApigeeOrgEnvironmentOptions";
-import { getBusinessUnits, getApplications, getApplicationDetail } from "../../../../http-service/onboardingApi";
+import { getApplicationDetail } from "../../../../http-service/onboardingApi";
 
 export default function CreateTargetServerModal({
     onClose,
@@ -48,76 +49,39 @@ export default function CreateTargetServerModal({
     } = useApigeeOrgEnvironmentOptions(form.organization);
 
     // ------------------------------------------------------------
-    // Gateway mode: Business Unit / Application, sourced from the real
-    // onboarding hierarchy (fg-onboarding-svc), not any legacy endpoint.
+    // Gateway mode: Business Unit -> Project -> Application, sourced from the
+    // real onboarding hierarchy via OnboardingHierarchySelect (no Team, no
+    // free-text Application ID — that's the legacy OnboardingCascadeSelect
+    // shape used below in non-gateway mode).
     // ------------------------------------------------------------
-    const [hierarchyBUs, setHierarchyBUs] = useState([]);
-    const [isLoadingGatewayBU, setIsLoadingGatewayBU] = useState(false);
-    const [gatewayBUError, setGatewayBUError] = useState("");
+    const [gatewaySelection, setGatewaySelection] = useState({
+        businessUnitId: "", projectId: "", applicationId: "",
+        businessUnit: null, project: null, application: null,
+    });
 
-    const [hierarchyApps, setHierarchyApps] = useState([]);
-    const [isLoadingGatewayApps, setIsLoadingGatewayApps] = useState(false);
-
-    const [selectedGatewayBU, setSelectedGatewayBU] = useState("");     // business unit id
-    const [selectedGatewayAppId, setSelectedGatewayAppId] = useState(""); // application's Mongo id
-
-    useEffect(() => {
-        if (!isGateway) return;
-        let cancelled = false;
-        setIsLoadingGatewayBU(true);
-        setGatewayBUError("");
-        getBusinessUnits(0, 200)
-            .then((list) => { if (!cancelled) setHierarchyBUs(list || []); })
-            .catch((err) => {
-                console.error("Business unit fetch failed:", err);
-                if (!cancelled) setGatewayBUError(err.message || "Failed to load business units");
-            })
-            .finally(() => { if (!cancelled) setIsLoadingGatewayBU(false); });
-        return () => { cancelled = true; };
-    }, [isGateway]);
-
-    useEffect(() => {
-        if (!isGateway || !selectedGatewayBU) { setHierarchyApps([]); return; }
-        let cancelled = false;
-        setIsLoadingGatewayApps(true);
-        getApplications({ businessUnitId: selectedGatewayBU, size: 200 })
-            .then((list) => { if (!cancelled) setHierarchyApps(list || []); })
-            .catch((err) => {
-                console.error("Application fetch failed:", err);
-                if (!cancelled) setHierarchyApps([]);
-            })
-            .finally(() => { if (!cancelled) setIsLoadingGatewayApps(false); });
-        return () => { cancelled = true; };
-    }, [isGateway, selectedGatewayBU]);
-
-    const gatewayBUOptions = hierarchyBUs;
-    const gatewayApplicationOptions = hierarchyApps;
-
-    const handleGatewayBUChange = (nextBU) => {
-        setSelectedGatewayBU(nextBU);
-        setSelectedGatewayAppId("");
-        setForm((prev) => ({ ...prev, onboardingId: "", microserviceId: "" }));
-    };
-
-    const handleGatewayAppChange = (nextAppMongoId) => {
-        setSelectedGatewayAppId(nextAppMongoId);
-        const app = hierarchyApps.find((a) => a.id === nextAppMongoId) || null;
+    const handleGatewaySelectionChange = (next) => {
+        setGatewaySelection(next);
         setForm((prev) => ({
             ...prev,
-            onboardingId: app?.applicationId || app?.id || "",
-            microserviceId: app?.id || "",
+            onboardingId: next.application?.applicationId || next.application?.id || "",
+            microserviceId: next.application?.id || "",
         }));
     };
 
-    // Given an Application's Mongo id, resolve its Business Unit + selection —
-    // used both to pre-fill from the `application` prop on create, and to
-    // restore the BU/Application cascade from tracked audit data on edit.
+    // Given an Application's Mongo id, resolve its Business Unit/Project +
+    // selection — used both to pre-fill from the `application` prop on
+    // create, and to restore the BU/Project/Application cascade from tracked
+    // audit data on edit.
     const hydrateGatewaySelectionFromApplicationId = async (appMongoId) => {
         if (!appMongoId) return;
         try {
             const app = await getApplicationDetail(appMongoId);
-            if (app?.businessUnitId) setSelectedGatewayBU(app.businessUnitId);
-            setSelectedGatewayAppId(appMongoId);
+            setGatewaySelection({
+                businessUnitId: app?.businessUnitId || "",
+                projectId: app?.projectId || "",
+                applicationId: appMongoId,
+                businessUnit: null, project: null, application: app || null,
+            });
             setForm((prev) => ({
                 ...prev,
                 onboardingId: prev.onboardingId || app?.applicationId || appMongoId,
@@ -191,18 +155,19 @@ export default function CreateTargetServerModal({
         }));
     };
 
-    // Gateway mode tracks the selected Business Unit / Application in the
-    // config-tracking registry (via x-project-id / x-application-id headers,
-    // see fg-apigee-wrapper-svc's tracking-metadata.service.ts) so Edit can
-    // restore the full selection later — not just onboardingId/microserviceId.
+    // Gateway mode tracks the selected Business Unit / Project / Application
+    // in the config-tracking registry (via x-project-id / x-application-id
+    // headers, see fg-apigee-wrapper-svc's tracking-metadata.service.ts) so
+    // Edit can restore the full selection later — not just onboardingId/
+    // microserviceId.
     const buildTrackingContext = () => {
         if (!isGateway) return form;
-        const app = hierarchyApps.find((a) => a.id === selectedGatewayAppId) || null;
         return {
             ...form,
-            applicationId: app?.applicationId,
-            applicationName: app?.name,
-            projectId: app?.projectId,
+            applicationId: gatewaySelection.application?.applicationId || gatewaySelection.application?.id,
+            applicationName: gatewaySelection.application?.name,
+            projectId: gatewaySelection.project?.id || gatewaySelection.projectId,
+            projectName: gatewaySelection.project?.name,
         };
     };
 
@@ -246,8 +211,8 @@ export default function CreateTargetServerModal({
 
     const handleSubmit = async () => {
         // Gateway mode validation
-        if (isGateway && !selectedGatewayAppId) {
-            const errMsg = "Please select a Business Unit and Application.";
+        if (isGateway && !gatewaySelection.applicationId) {
+            const errMsg = "Please select a Business Unit, Project and Application.";
             if (onError) onError(errMsg);
             return;
         }
@@ -345,52 +310,14 @@ export default function CreateTargetServerModal({
                         </>
                     ) : (
                         // =============== GATEWAY MODE ===============
-                        <div className="grid grid-cols-2 gap-6">
-                            <div>
-                                <label className="text-sm text-gray-400">Business Unit*</label>
-                                <select
-                                    value={selectedGatewayBU}
-                                    disabled={isLoadingGatewayBU}
-                                    className={inputStyle}
-                                    onChange={(e) => handleGatewayBUChange(e.target.value)}
-                                >
-                                    <option value="">
-                                        {isLoadingGatewayBU ? "Loading business units..." : "Select Business Unit"}
-                                    </option>
-                                    {gatewayBUOptions.map((unit) => (
-                                        <option key={unit.id} value={unit.id}>
-                                            {unit.displayName || unit.name}
-                                        </option>
-                                    ))}
-                                </select>
-                                {gatewayBUError && (
-                                    <p className="text-xs text-red-400 mt-1">{gatewayBUError}</p>
-                                )}
-                            </div>
-                            <div>
-                                <label className="text-sm text-gray-400">Application*</label>
-                                <select
-                                    value={selectedGatewayAppId}
-                                    disabled={isLoadingGatewayApps || !selectedGatewayBU}
-                                    className={inputStyle}
-                                    onChange={(e) => handleGatewayAppChange(e.target.value)}
-                                >
-                                    <option value="">
-                                        {!selectedGatewayBU
-                                            ? "Select a business unit first"
-                                            : isLoadingGatewayApps
-                                            ? "Loading applications..."
-                                            : "Select Application"}
-                                    </option>
-                                    {gatewayApplicationOptions.map((app) => (
-                                        <option key={app.id} value={app.id}>
-                                            {app.name}
-                                            {app.applicationId ? ` (${app.applicationId})` : ""}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
+                        <OnboardingHierarchySelect
+                            businessUnitId={gatewaySelection.businessUnitId}
+                            projectId={gatewaySelection.projectId}
+                            applicationId={gatewaySelection.applicationId}
+                            onChange={handleGatewaySelectionChange}
+                            required
+                            selectClassName={inputStyle}
+                        />
                     )}
 
                     {/* Common fields for both modes */}

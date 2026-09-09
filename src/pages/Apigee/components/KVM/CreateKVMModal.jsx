@@ -4,7 +4,9 @@ import { APIGEE_ENDPOINTS } from "../../../../config/apigeeConfig";
 import { apigeeApiFetch } from "../../../../services/apigeeApiService";
 import { getTrackingHeaders } from "../apigeeTracking";
 import OnboardingCascadeSelect from "../OnboardingCascadeSelect";
+import OnboardingHierarchySelect from "../OnboardingHierarchySelect";
 import useApigeeOrgEnvironmentOptions from "../useApigeeOrgEnvironmentOptions";
+import { getApplicationDetail } from "../../../../http-service/onboardingApi";
 
 export default function CreateKVMModal({
     onClose,
@@ -16,6 +18,9 @@ export default function CreateKVMModal({
     isFetchingOnboardings = false,
     defaultOnboardingId = "",
     defaultMicroserviceId = "",
+    // Gateway specific props — same convention as CreateTargetServerModal.jsx
+    isGateway = false,
+    application = null,
 }) {
     const resolvedOrganization = editData?.org || editData?.projectId || editData?.organization || organization || "";
     const resolvedEnvironment = editData?.env || editData?.environment || environment || "";
@@ -38,6 +43,63 @@ export default function CreateKVMModal({
         isFetchingOrganizations,
         isFetchingEnvironments,
     } = useApigeeOrgEnvironmentOptions(form.organization);
+
+    // ------------------------------------------------------------
+    // Gateway mode: Business Unit -> Project -> Application, same convention
+    // as CreateTargetServerModal.jsx's OnboardingHierarchySelect usage.
+    // ------------------------------------------------------------
+    const [gatewaySelection, setGatewaySelection] = useState({
+        businessUnitId: "", projectId: "", applicationId: "",
+        businessUnit: null, project: null, application: null,
+    });
+
+    const handleGatewaySelectionChange = (next) => {
+        setGatewaySelection(next);
+        setForm((prev) => ({
+            ...prev,
+            onboardingId: next.application?.applicationId || next.application?.id || "",
+            microserviceId: next.application?.id || "",
+        }));
+    };
+
+    const hydrateGatewaySelectionFromApplicationId = async (appMongoId) => {
+        if (!appMongoId) return;
+        try {
+            const app = await getApplicationDetail(appMongoId);
+            setGatewaySelection({
+                businessUnitId: app?.businessUnitId || "",
+                projectId: app?.projectId || "",
+                applicationId: appMongoId,
+                businessUnit: null, project: null, application: app || null,
+            });
+            setForm((prev) => ({
+                ...prev,
+                onboardingId: prev.onboardingId || app?.applicationId || appMongoId,
+                microserviceId: appMongoId,
+            }));
+        } catch (err) {
+            console.error("Failed to load application detail", err);
+        }
+    };
+
+    useEffect(() => {
+        if (isGateway && !editData?.name && application?.id) {
+            hydrateGatewaySelectionFromApplicationId(application.id);
+        }
+        // Only ever run this prefill once, on mount, for the create flow.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const buildTrackingContext = () => {
+        if (!isGateway) return form;
+        return {
+            ...form,
+            applicationId: gatewaySelection.application?.applicationId || gatewaySelection.application?.id,
+            applicationName: gatewaySelection.application?.name,
+            projectId: gatewaySelection.project?.id || gatewaySelection.projectId,
+            projectName: gatewaySelection.project?.name,
+        };
+    };
 
     // State for grid
     const [entries, setEntries] = useState([
@@ -187,11 +249,15 @@ export default function CreateKVMModal({
             microserviceId: editData?.microserviceId || defaultMicroserviceId || "",
         });
         setSubmitError("");
+        if (isGateway && editData?.microserviceId) {
+            hydrateGatewaySelectionFromApplicationId(editData.microserviceId);
+        }
         fetchKVMEntries(
             editData?.org || editData?.projectId || editData?.organization || organization,
             editData?.env || editData?.environment || environment,
             editData?.name
         );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editData]);
 
     const createKVM = async (org, environment) => {
@@ -199,7 +265,7 @@ export default function CreateKVMModal({
             APIGEE_ENDPOINTS.KVM_ENV_LEVEL.CREATE(org, environment),
             {
                 method: "POST",
-                headers: getTrackingHeaders(form),
+                headers: getTrackingHeaders(buildTrackingContext()),
                 body: JSON.stringify({
                     name: form.name,
                     encrypted: true,
@@ -225,7 +291,7 @@ export default function CreateKVMModal({
                     APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.CREATE(org, environment, kvmName),
                     {
                         method: "POST",
-                        headers: getTrackingHeaders(form),
+                        headers: getTrackingHeaders(buildTrackingContext()),
                         body: JSON.stringify({
                             name: entry.key.trim(),
                             value: entry.value,
@@ -255,7 +321,12 @@ export default function CreateKVMModal({
             return;
         }
 
-        if (!form.onboardingId) {
+        if (isGateway && !gatewaySelection.applicationId) {
+            setSubmitError("Please select a Business Unit, Project and Application.");
+            return;
+        }
+
+        if (!isGateway && !form.onboardingId) {
             setSubmitError("Onboarding Id is required.");
             return;
         }
@@ -307,62 +378,78 @@ export default function CreateKVMModal({
                 <div className="p-6 space-y-6 overflow-y-auto modal-body" style={{ height: "calc(100% - 9rem)" }}>
 
                     {/* Row 1 */}
-                    <div className="grid grid-cols-2 gap-6">
-                        <OnboardingCascadeSelect
-                            value={form.onboardingId}
-                            onChange={handleOnboardingChange}
-                            options={onboardingOptions}
-                            isLoading={isFetchingOnboardings}
+                    {isGateway ? (
+                        // Gateway mode: Business Unit -> Project -> Application, same
+                        // convention as CreateTargetServerModal.jsx. Project Id/
+                        // Environment aren't shown here — they come from the page's
+                        // own Organization/Environment context (organization/
+                        // environment props), same as Target Server's gateway mode.
+                        <OnboardingHierarchySelect
+                            businessUnitId={gatewaySelection.businessUnitId}
+                            projectId={gatewaySelection.projectId}
+                            applicationId={gatewaySelection.applicationId}
+                            onChange={handleGatewaySelectionChange}
                             required
-                            className="col-span-2"
                             selectClassName={inputStyle}
                         />
+                    ) : (
+                        <div className="grid grid-cols-2 gap-6">
+                            <OnboardingCascadeSelect
+                                value={form.onboardingId}
+                                onChange={handleOnboardingChange}
+                                options={onboardingOptions}
+                                isLoading={isFetchingOnboardings}
+                                required
+                                className="col-span-2"
+                                selectClassName={inputStyle}
+                            />
 
-                        {/* Project Id */}
-                        <div>
-                            <label className="text-sm text-gray-400">
-                                Project Id*
-                            </label>
-                            <select
-                                value={form.organization}
-                                className={inputStyle}
-                                onChange={(e) => handleChange("organization", e.target.value)}
-                            >
-                                <option value="">
-                                    {isFetchingOrganizations ? "Loading project ids..." : "Select Project Id"}
-                                </option>
-                                {form.organization && !organizations.includes(form.organization) && (
-                                    <option value={form.organization}>{form.organization}</option>
-                                )}
-                                {organizations.map((org) => (
-                                    <option key={org} value={org}>{org}</option>
-                                ))}
-                            </select>
-                        </div>
+                            {/* Project Id */}
+                            <div>
+                                <label className="text-sm text-gray-400">
+                                    Project Id*
+                                </label>
+                                <select
+                                    value={form.organization}
+                                    className={inputStyle}
+                                    onChange={(e) => handleChange("organization", e.target.value)}
+                                >
+                                    <option value="">
+                                        {isFetchingOrganizations ? "Loading project ids..." : "Select Project Id"}
+                                    </option>
+                                    {form.organization && !organizations.includes(form.organization) && (
+                                        <option value={form.organization}>{form.organization}</option>
+                                    )}
+                                    {organizations.map((org) => (
+                                        <option key={org} value={org}>{org}</option>
+                                    ))}
+                                </select>
+                            </div>
 
-                        {/* Environment */}
-                        <div>
-                            <label className="text-sm text-gray-400">
-                                Environment*
-                            </label>
-                            <select
-                                value={form.environment}
-                                className={inputStyle}
-                                disabled={isFetchingEnvironments}
-                                onChange={(e) => handleChange("environment", e.target.value)}
-                            >
-                                <option value="">
-                                    {isFetchingEnvironments ? "Loading environments..." : "Select Environment"}
-                                </option>
-                                {form.environment && !environments.includes(form.environment) && (
-                                    <option value={form.environment}>{form.environment}</option>
-                                )}
-                                {environments.map((envName) => (
-                                    <option key={envName} value={envName}>{envName}</option>
-                                ))}
-                            </select>
+                            {/* Environment */}
+                            <div>
+                                <label className="text-sm text-gray-400">
+                                    Environment*
+                                </label>
+                                <select
+                                    value={form.environment}
+                                    className={inputStyle}
+                                    disabled={isFetchingEnvironments}
+                                    onChange={(e) => handleChange("environment", e.target.value)}
+                                >
+                                    <option value="">
+                                        {isFetchingEnvironments ? "Loading environments..." : "Select Environment"}
+                                    </option>
+                                    {form.environment && !environments.includes(form.environment) && (
+                                        <option value={form.environment}>{form.environment}</option>
+                                    )}
+                                    {environments.map((envName) => (
+                                        <option key={envName} value={envName}>{envName}</option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Row 2 */}
                     <div className="grid grid-cols-2 gap-6">

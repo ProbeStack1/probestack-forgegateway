@@ -16,6 +16,10 @@ export default function OnboardingCascadeSelect({
   allowAll = false,
   className = "",
   selectClassName = defaultSelectClassName,
+  // The middle tier is "teamName" on the option objects, but callers whose onboarding
+  // hierarchy calls that level "Project" rather than "Team" can relabel it here without
+  // needing a separate copy of this component.
+  teamLabel = "Team Name",
 }) {
   const selectedOption = useMemo(
     () => options.find((option) => option.onboardingId === value) || null,
@@ -85,7 +89,7 @@ export default function OnboardingCascadeSelect({
 
       <div>
         <label className="block text-sm text-gray-300 mb-2">
-          Team Name{required ? "*" : ""}
+          {teamLabel}{required ? "*" : ""}
         </label>
         <select
           value={teamName}
@@ -94,7 +98,7 @@ export default function OnboardingCascadeSelect({
           onChange={(event) => handleTeamChange(event.target.value)}
         >
           <option value="">
-            {businessUnit ? (allowAll ? "All Teams" : "Select Team Name") : "Select a business unit first"}
+            {businessUnit ? (allowAll ? `All ${teamLabel}s` : `Select ${teamLabel}`) : "Select a business unit first"}
           </option>
           {teamOptions.map((team) => (
             <option key={team} value={team}>{team}</option>

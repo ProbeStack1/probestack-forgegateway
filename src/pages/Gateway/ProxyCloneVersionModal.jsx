@@ -250,6 +250,22 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
   const onboardingRecord = onboarding?.onboarding;
   const microservice = onboarding?.resource?.microservice;
 
+  // The Business Unit / Team / Application picked in the cascade select already carries
+  // that data straight off the option (it's exactly what populated the dropdowns), so show
+  // it immediately rather than waiting on — or blanking out on failure of — a further
+  // "/resources/{id}" round trip. That extra fetch (via loadOnboardingDetails) still runs to
+  // fill in details the option itself doesn't carry, like Owner/Owner Email.
+  const displayBusinessUnit = onboardingRecord?.businessUnit || selectedManualOption?.businessUnit;
+  const displayTeam = onboardingRecord?.teamName || selectedManualOption?.teamName;
+  const displayApplication = onboardingRecord?.applicationName || microservice?.applicationName || selectedManualOption?.applicationName;
+  const displayApplicationId = selectedManualOption?.applicationId;
+  const displayOwner = onboardingRecord?.projectOwner;
+  const displayOwnerEmail = onboardingRecord?.ownerEmail;
+  const displayApiName = microservice?.apiName;
+  const hasOnboardingContext = Boolean(
+    proxy?.lifecycle?.microserviceId || selectedManualOption || displayBusinessUnit || displayTeam || displayApplication
+  );
+
   const handleSubmit = async () => {
     if (isClone && !newName.trim()) { setError("New proxy name is required."); return; }
     if (isClone && !/^[a-zA-Z0-9_-]+$/.test(newName.trim())) { setError("Only letters, numbers, hyphens and underscores allowed in the name."); return; }
@@ -432,52 +448,43 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
           </div>
 
           {/* Onboarding Details — auto-resolved from the proxy's ForgeSphere lifecycle
-              record when it has one; otherwise let the user pick one from the same
-              Business Unit → Team → Application ID hierarchy used elsewhere in this app. */}
+              record when it has one; otherwise pick one from the same Business Unit →
+              Team → Application ID hierarchy used elsewhere in this app. Once a Business
+              Unit/Team/Application is picked, its details show immediately — they're
+              already on the selected option, no extra round trip needed for those. */}
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Onboarding Details</h4>
 
             {!proxy?.lifecycle?.microserviceId && (
-              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 space-y-2">
-                <div className="flex items-start gap-2">
-                  <Info className="h-3.5 w-3.5 text-amber-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-200/80">
-                    "{proxy.name}" wasn't created through ForgeSphere onboarding, so it has no onboarding record on file. Select one below to link this {isClone ? "clone" : "version"} to an application, or leave it blank — cloning/versioning still works either way.
-                  </p>
-                </div>
-                <OnboardingCascadeSelect
-                  value={selectedManualOnboardingId}
-                  onChange={handleManualOnboardingChange}
-                  options={manualOnboardingOptions}
-                  isLoading={loadingManualOnboardingOptions}
-                  selectClassName="w-full bg-[#0f172a]/50 border border-[#2a3550] rounded-lg px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:border-[#ff5b1f]"
-                />
-                {manualOnboardingError && (
-                  <p className="text-[11px] text-red-400">Couldn't load onboarding options ({manualOnboardingError}).</p>
+              <OnboardingCascadeSelect
+                value={selectedManualOnboardingId}
+                onChange={handleManualOnboardingChange}
+                options={manualOnboardingOptions}
+                isLoading={loadingManualOnboardingOptions}
+                teamLabel="Project"
+                selectClassName="w-full bg-[#0f172a]/50 border border-[#2a3550] rounded-lg px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:border-[#ff5b1f]"
+              />
+            )}
+            {manualOnboardingError && (
+              <p className="text-[11px] text-red-400">Couldn't load onboarding options ({manualOnboardingError}).</p>
+            )}
+
+            {hasOnboardingContext && (
+              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <InfoField icon={Building2} label="Business Unit" value={displayBusinessUnit} />
+                <InfoField icon={Users} label="Project" value={displayTeam} />
+                <InfoField icon={Globe} label="Application" value={displayApplication} />
+                <InfoField icon={Info} label="Application ID" value={displayApplicationId} />
+                <InfoField icon={User} label="Owner" value={displayOwner} />
+                <InfoField icon={Mail} label="Owner Email" value={displayOwnerEmail} />
+                {displayApiName && <InfoField icon={Info} label="API Name" value={displayApiName} />}
+                {onboardingLoading && (
+                  <div className="col-span-full flex items-center gap-2 text-[11px] text-slate-500">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading additional details…
+                  </div>
                 )}
               </div>
             )}
-
-            {onboardingLoading ? (
-              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 flex items-center gap-2 text-xs text-slate-400">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading onboarding details…
-              </div>
-            ) : onboardingError ? (
-              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 text-xs text-slate-500">
-                Couldn't load onboarding details ({onboardingError}) — clone/versioning will still proceed.
-              </div>
-            ) : onboardingRecord || microservice ? (
-              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <InfoField icon={Building2} label="Business Unit" value={onboardingRecord?.businessUnit} />
-                <InfoField icon={Users} label="Team" value={onboardingRecord?.teamName} />
-                <InfoField icon={Globe} label="Application" value={onboardingRecord?.applicationName || microservice?.applicationName} />
-                <InfoField icon={User} label="Owner" value={onboardingRecord?.projectOwner} />
-                <InfoField icon={Mail} label="Owner Email" value={onboardingRecord?.ownerEmail} />
-                <InfoField icon={Info} label="API Name" value={microservice?.apiName} />
-              </div>
-            ) : proxy?.lifecycle?.microserviceId ? (
-              <div className="rounded-lg border border-[#2a3550] bg-[#0f1117]/60 p-3 text-xs text-slate-500">No onboarding details found for this resource.</div>
-            ) : null}
           </div>
 
           {/* New details */}

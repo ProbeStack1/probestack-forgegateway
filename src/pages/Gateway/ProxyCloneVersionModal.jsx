@@ -15,7 +15,7 @@
 //   - shows the existing base path and requires the user to edit it before cloning
 //   - after the new bundle is generated/imported, opens it straight in the Proxy Editor
 //   - writes/refreshes an "auth-config" Key Value Map entry for the new proxy
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X, Copy, GitBranch, Loader2, Building2, FolderKanban, LayoutGrid, User, Mail } from "lucide-react";
 import JSZip from "jszip";
@@ -40,7 +40,7 @@ const parseApigeeErrorMessage = (text) => {
 };
 
 async function proxyExists(token, org, apiName) {
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `${APIGEE_WRAPPER_BASE}/organizations/${encodeURIComponent(org)}/apis/${encodeURIComponent(apiName)}/details`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -48,7 +48,7 @@ async function proxyExists(token, org, apiName) {
 }
 
 async function fetchLatestBundle(token, org, apiName) {
-  const detailsRes = await fetch(
+  const detailsRes = await fetchWithRetry(
     `${APIGEE_WRAPPER_BASE}/organizations/${encodeURIComponent(org)}/apis/${encodeURIComponent(apiName)}/details`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -56,7 +56,7 @@ async function fetchLatestBundle(token, org, apiName) {
   const details = await detailsRes.json();
   const latestRev = details.proxy?.latestRevisionId;
   if (!latestRev) throw new Error("This proxy has no revisions to clone from.");
-  const bundleRes = await fetch(
+  const bundleRes = await fetchWithRetry(
     `https://apigee.googleapis.com/v1/organizations/${encodeURIComponent(org)}/apis/${encodeURIComponent(apiName)}/revisions/${latestRev}/?format=bundle`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -120,17 +120,21 @@ async function rewriteProxyName(zip, rootPath, newName) {
   zip.file(newPath, serializer.serializeToString(doc));
 }
 
-// Apigee's Management API rate-limits aggressively — a Clone/Version does several calls
-// back to back (bundle download, import, KVM ensure/get/upsert, deploy) and the last one
-// (deploy) is the one most likely to land on a 429. Retry it with backoff instead of just
-// surfacing "Too Many Requests" to the user.
-async function fetchWithRetry(url, options, { retries = 3, baseDelayMs = 1500 } = {}) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Apigee's Management API rate-limits aggressively (some trial/eval orgs enforce this per
+// MINUTE, not per second) — every call in this flow, not just the last one, can land on a
+// 429 once enough of them stack up. Retry with backoff (honoring Retry-After when Apigee
+// sends one) rather than surfacing "Too Many Requests" to the user on the first hit. Every
+// direct Apigee/wrapper call in this file goes through this — see calls below.
+async function fetchWithRetry(url, options, { retries = 5, baseDelayMs = 2000, maxDelayMs = 20000 } = {}) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(url, options);
     if (res.status !== 429 || attempt >= retries) return res;
     const retryAfterHeader = res.headers.get("Retry-After");
-    const delayMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : baseDelayMs * 2 ** attempt;
-    await new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : baseDelayMs));
+    const uncapped = retryAfterHeader ? Number(retryAfterHeader) * 1000 : baseDelayMs * 2 ** attempt;
+    const delayMs = Math.min(Number.isFinite(uncapped) ? uncapped : baseDelayMs, maxDelayMs);
+    await sleep(delayMs);
   }
 }
 
@@ -139,9 +143,9 @@ async function fetchWithRetry(url, options, { retries = 3, baseDelayMs = 1500 } 
 // under the "auth-config" name the clone/version flow is expected to carry forward.
 const ensureKvmExists = async (org, env, kvmName, token, tracking) => {
   const headers = { ...getTrackingHeaders(tracking), Authorization: `Bearer ${token}` };
-  const getRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.GET(org, env, kvmName), { headers });
+  const getRes = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.GET(org, env, kvmName), { headers });
   if (getRes.ok) return;
-  const createRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.CREATE(org, env), {
+  const createRes = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL.CREATE(org, env), {
     method: "POST",
     headers,
     body: JSON.stringify({ name: kvmName, encrypted: true }),
@@ -152,7 +156,7 @@ const ensureKvmExists = async (org, env, kvmName, token, tracking) => {
 };
 
 const getKvmEntry = async (org, env, kvmName, entryName, token, tracking) => {
-  const res = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.GET(org, env, kvmName, entryName), {
+  const res = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.GET(org, env, kvmName, entryName), {
     headers: { ...getTrackingHeaders(tracking), Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return null;
@@ -163,10 +167,10 @@ const getKvmEntry = async (org, env, kvmName, entryName, token, tracking) => {
 const upsertKvmEntry = async (org, env, kvmName, entryName, entryValue, token, tracking) => {
   const headers = { ...getTrackingHeaders(tracking), Authorization: `Bearer ${token}` };
   const body = JSON.stringify({ name: entryName, value: entryValue });
-  const createRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.CREATE(org, env, kvmName), { method: "POST", headers, body });
+  const createRes = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.CREATE(org, env, kvmName), { method: "POST", headers, body });
   if (createRes.ok) return;
   if (createRes.status === 409 || createRes.status === 400) {
-    const updateRes = await fetch(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.UPDATE(org, env, kvmName, entryName), { method: "PUT", headers, body });
+    const updateRes = await fetchWithRetry(APIGEE_ENDPOINTS.KVM_ENV_LEVEL_ENTRY.UPDATE(org, env, kvmName, entryName), { method: "PUT", headers, body });
     if (updateRes.ok) return;
     throw new Error(`Failed to update Key Value Map entry "${entryName}": ${updateRes.status} ${await updateRes.text()}`);
   }
@@ -198,6 +202,11 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
   const [loadingDefaults, setLoadingDefaults] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Cache the bundle downloaded to preview the existing base path, so Submit reuses it
+  // instead of downloading the same revision from Apigee a second time — every request
+  // here counts against the same org-wide Apigee rate limit that was getting tripped.
+  const sourceBundleRef = useRef(null);
 
   // Onboarding mapping for this clone/version — the same Business Unit → Project →
   // Application hierarchy GatewayContextSelector and the Create Proxy dialog already
@@ -231,11 +240,13 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
     setSelectedBUId("");
     setSelectedProjectId("");
     setSelectedApplicationId("");
+    sourceBundleRef.current = null;
 
     (async () => {
       try {
         const token = await fetchApigeeToken();
-        const { blob } = await fetchLatestBundle(token, org, proxy.name);
+        const { blob, latestRev } = await fetchLatestBundle(token, org, proxy.name);
+        sourceBundleRef.current = { blob, latestRev };
         const zip = await JSZip.loadAsync(blob);
         const currentBasePath = await readBasePath(zip);
         setExistingBasePath(currentBasePath);
@@ -311,7 +322,9 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
         }
       }
 
-      const { blob } = await fetchLatestBundle(token, org, proxy.name);
+      // Reuse the bundle already downloaded to preview the existing base path when the
+      // dialog opened, rather than downloading the same revision from Apigee again.
+      const { blob } = sourceBundleRef.current ?? await fetchLatestBundle(token, org, proxy.name);
       const zip = await JSZip.loadAsync(blob);
       await rewriteBasePath(zip, newBasePath.trim());
       if (isClone) {

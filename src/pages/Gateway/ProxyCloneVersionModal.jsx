@@ -93,6 +93,47 @@ async function rewriteBasePath(zip, newBasePath) {
   }
 }
 
+// The bundle's root descriptor — apiproxy/<Name>.xml, one path segment directly under
+// "apiproxy/" (unlike policies/proxies/targets/resources, which all live one level deeper)
+// — carries the proxy's *internal* name and revision. Apigee's import API names the created
+// proxy from the "name" query param regardless of what's in here, but leaving this stale
+// means anything that reads the bundle afterwards (like opening it in the Proxy Editor)
+// still shows the OLD proxy's name/revision instead of the clone's.
+function findRootProxyXmlPath(zip) {
+  return Object.keys(zip.files).find((path) => {
+    const parts = path.split("/");
+    const idx = parts.indexOf("apiproxy");
+    return idx !== -1 && parts.length === idx + 2 && parts[idx + 1].endsWith(".xml");
+  });
+}
+
+async function rewriteProxyName(zip, rootPath, newName) {
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
+  const xml = await zip.files[rootPath].async("text");
+  const doc = parser.parseFromString(xml, "application/xml");
+  const root = doc.querySelector("APIProxy");
+  if (!root) return;
+  root.setAttribute("name", newName);
+  const newPath = rootPath.replace(/[^/]+\.xml$/, `${newName}.xml`);
+  zip.remove(rootPath);
+  zip.file(newPath, serializer.serializeToString(doc));
+}
+
+// Apigee's Management API rate-limits aggressively — a Clone/Version does several calls
+// back to back (bundle download, import, KVM ensure/get/upsert, deploy) and the last one
+// (deploy) is the one most likely to land on a 429. Retry it with backoff instead of just
+// surfacing "Too Many Requests" to the user.
+async function fetchWithRetry(url, options, { retries = 3, baseDelayMs = 1500 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status !== 429 || attempt >= retries) return res;
+    const retryAfterHeader = res.headers.get("Retry-After");
+    const delayMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : baseDelayMs * 2 ** attempt;
+    await new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) ? delayMs : baseDelayMs));
+  }
+}
+
 // Same KVM_ENV_LEVEL / KVM_ENV_LEVEL_ENTRY endpoints (and create-then-fall-back-to-update
 // pattern) the Create Proxy dialog already uses for its "security-config" KVM — reused here
 // under the "auth-config" name the clone/version flow is expected to carry forward.
@@ -254,13 +295,14 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
     try {
       const token = await fetchApigeeToken();
 
+      const targetName = isClone ? newName.trim() : proxy.name;
+
       // Apigee's import API treats "import a bundle under a name that already exists" as
       // a new REVISION of that existing proxy, not a new proxy — so an un-checked name
       // collision here would silently overwrite an unrelated proxy's revision history
       // instead of failing loudly. Only relevant to Clone (Version intentionally reuses
       // the source's own name).
       if (isClone) {
-        const targetName = newName.trim();
         const collides = await proxyExists(token, org, targetName);
         if (collides) {
           setError(`A proxy named "${targetName}" already exists in this organization — choose a different name, or importing this bundle would add a new revision to that unrelated proxy instead of creating a clone.`);
@@ -272,13 +314,21 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       const { blob } = await fetchLatestBundle(token, org, proxy.name);
       const zip = await JSZip.loadAsync(blob);
       await rewriteBasePath(zip, newBasePath.trim());
+      if (isClone) {
+        // Otherwise the bundle's internal <APIProxy name="..."> (and its revision) stay
+        // stamped with the SOURCE proxy's identity — cosmetically harmless to Apigee's
+        // import (it names the proxy from the ?name= query param), but anything that reads
+        // the bundle back afterwards, like opening it straight in the Proxy Editor, would
+        // show the old proxy's name/revision instead of the clone's.
+        const rootPath = findRootProxyXmlPath(zip);
+        if (rootPath) await rewriteProxyName(zip, rootPath, targetName);
+      }
       const newBlob = await zip.generateAsync({ type: "blob" });
 
-      const targetName = isClone ? newName.trim() : proxy.name;
       const formData = new FormData();
       formData.append("file", newBlob, `${targetName}.zip`);
       const importUrl = `https://apigee.googleapis.com/v1/organizations/${encodeURIComponent(org)}/apis?action=import&name=${encodeURIComponent(targetName)}`;
-      const importRes = await fetch(importUrl, {
+      const importRes = await fetchWithRetry(importUrl, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
@@ -351,7 +401,7 @@ export default function ProxyCloneVersionModal({ open, mode, proxy, org, environ
       if (targetEnv && deployAfterImport) {
         try {
           const deployUrl = `https://apigee.googleapis.com/v1/organizations/${encodeURIComponent(org)}/environments/${encodeURIComponent(targetEnv)}/apis/${encodeURIComponent(targetName)}/revisions/${newRevision}/deployments?override=true`;
-          const deployRes = await fetch(deployUrl, {
+          const deployRes = await fetchWithRetry(deployUrl, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({ override: true }),

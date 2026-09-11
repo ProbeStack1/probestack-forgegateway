@@ -114,6 +114,14 @@ const triggerAndPollGithubPipeline = async ({ microserviceId, payload, action, t
 };
 
 export const deploymentService = {
+  async getDeploymentCatalog(projectType) {
+    try {
+      const response = await axiosInstance.get(API_ENDPOINTS.API_DEVELOPMENT.GET_DEPLOYMENT_CATALOG(projectType));
+      return { success: true, data: response.data };
+    } catch (error) {
+      return { success: false, error: unwrapError(error, 'Unable to load deployment catalog') };
+    }
+  },
   async syncDeploymentArtifacts(microserviceId, payload) {
     try {
       const config = await apigeeTokenHeaders();

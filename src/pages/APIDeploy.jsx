@@ -58,7 +58,9 @@ const APIGEE_SUBTYPES = [
 const getApigeeSubtypes = (gatewayMode) => [
   {
     id: 'proxy',
-    label: gatewayMode ? 'Proxy' : 'API Proxy',
+    // Gateway users work with APIs. "Proxy" is an implementation detail of
+    // Apigee and was also inconsistent with the rest of the Gateway UI.
+    label: gatewayMode ? 'API' : 'API Proxy',
     icon: Network,
     projectType: 'APIGEE_PROXY',
     deploymentKey: 'apigee-api-proxy',
@@ -398,17 +400,12 @@ export default function APIDeploy({ isGateway = false }) {
   }, [items, query]);
 
   useEffect(() => {
-    if (isGateway) {
-      const apigeeCategory = API_CATEGORIES.find(c => c.id === 'apigee');
-      if (apigeeCategory && category.id !== apigeeCategory.id) {
-        setCategory(apigeeCategory);
-      }
-      // Do NOT force subtype; let the user select from the subtype row
-      if (category.id === 'apigee' && (!subtype || subtype.id !== 'proxy')) {
-        setSubtype(APIGEE_SUBTYPES[0]);
-      }
+    if (!isGateway) return;
+    const apigeeCategory = API_CATEGORIES.find((entry) => entry.id === 'apigee');
+    if (apigeeCategory && category.id !== apigeeCategory.id) {
+      setCategory(apigeeCategory);
     }
-  }, [isGateway]);
+  }, [category.id, isGateway]);
 
   useEffect(() => {
     if (routeMode !== 'history') return;
@@ -419,9 +416,12 @@ export default function APIDeploy({ isGateway = false }) {
       if (apigeeCategory && category.id !== apigeeCategory.id) {
         setCategory(apigeeCategory);
       }
-      // Optionally, if subtype is not valid for apigee, set to proxy
-      if (subtype && !APIGEE_SUBTYPES.some(s => s.id === subtype.id)) {
-        setSubtype(APIGEE_SUBTYPES[0]);
+      // Preserve the gateway selection (API / Global Function / Config).
+      // The old code always reset it to Proxy, making the other two tabs look
+      // empty or immediately switch away while their request was in flight.
+      const validSubtypes = getApigeeSubtypes(true);
+      if (subtype && !validSubtypes.some((entry) => entry.id === subtype.id)) {
+        setSubtype(validSubtypes[0]);
       }
       return; // skip reading from URL params because we want to enforce gateway behavior
     }
@@ -547,12 +547,20 @@ export default function APIDeploy({ isGateway = false }) {
   };
 
   const mapDeploymentCandidate = (item, deploymentKey, projectTypeFallback) => {
-    const microservice = item?.microservice || {};
+    // The onboarding service has returned both the full context shape
+    // ({ microservice, requirement, ... }) and summary/direct resource rows
+    // across versions. Treat a direct row as its own microservice so a valid
+    // backend response can never render as an empty deploy catalog.
+    const microservice = item?.microservice || item?.resource || item || {};
     const requirement = item?.requirement || {};
-    const apiDesign = item?.apiDesign || {};
+    const apiDesign = item?.apiDesign || item?.apiDesignDetails || {};
     const specMetadata = apiDesign?.specMetadata || {};
     const mockApi = item?.mockApi || {};
-    const codeGenResults = Array.isArray(item?.codeGenResults) ? item.codeGenResults : [];
+    const codeGenResults = Array.isArray(item?.codeGenResults)
+      ? item.codeGenResults
+      : Array.isArray(microservice?.codeGenResults)
+        ? microservice.codeGenResults
+        : [];
     const successfulCodeGen = codeGenResults.find((result) => result?.status === 'SUCCESS') || codeGenResults[0] || {};
     const deploymentUrl = deploymentKey === DEPLOYMENT_TYPES.MICROSERVICE
       ? getMicroserviceDeploymentUrlFromResource(item)
@@ -563,12 +571,12 @@ export default function APIDeploy({ isGateway = false }) {
     const version = item?.projectMetadata?.version || '1.0.0';
 
     return {
-      id: microservice.id || item.id,
+      id: microservice.id || microservice._id || item.id || item._id,
       type: deploymentKey,
       projectType: projectTypeFallback,
       organizationId: microservice.organizationId || item.organizationId || requirement.organizationId,
-      name: microservice.apiName || specMetadata.specName || successfulCodeGen.artifactId || 'Unnamed Service',
-      apigeeProxyName: successfulCodeGen.artifactId || microservice.applicationName || specMetadata.specName || 'Unnamed Service',
+      name: microservice.apiName || microservice.name || microservice.applicationName || specMetadata.specName || successfulCodeGen.artifactId || 'Unnamed Service',
+      apigeeProxyName: microservice.apigeeProxyName || microservice.sharedFlowName || successfulCodeGen.artifactId || microservice.apiName || microservice.applicationName || specMetadata.specName || 'Unnamed Service',
       appId: microservice.applicationId || 'N/A',
       version: `v${version}`,
       description: requirement.functionalRequirements || specMetadata.fileName || 'No description available',
@@ -724,9 +732,40 @@ export default function APIDeploy({ isGateway = false }) {
           throw new Error(result.error || 'Unable to load deployable items');
         }
 
-        fetchedItems = (result.data?.data || []).map((entry) =>
+        const payload = result.data?.data ?? result.data ?? [];
+        const rows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload.content)
+            ? payload.content
+            : Array.isArray(payload.items)
+              ? payload.items
+              : [];
+        fetchedItems = rows.map((entry) =>
           mapDeploymentCandidate(entry, nextDeploymentType, projectType)
-        );
+        ).filter((entry) => entry.id);
+
+        // A deployed gateway asset can legitimately predate its onboarding
+        // record. The authenticated catalog reads successful deployment history
+        // and is therefore the authoritative fallback for AI Deploy.
+        if (fetchedItems.length === 0 && category.id === 'apigee') {
+          const catalogResult = await deploymentService.getDeploymentCatalog(projectType);
+          if (catalogResult.success) {
+            const catalogRows = extractData(catalogResult) || [];
+            fetchedItems = (Array.isArray(catalogRows) ? catalogRows : []).map((entry) =>
+              mapDeploymentCandidate({
+                id: entry.microserviceId,
+                microservice: {
+                  id: entry.microserviceId,
+                  apiName: entry.name,
+                  apigeeProxyName: entry.name,
+                  applicationId: entry.applicationId,
+                },
+                projectMetadata: { version: entry.latestRevision || '1.0.0' },
+                codeGenResults: [{ status: 'SUCCESS', artifactId: entry.name, updatedAt: entry.deployedAt }],
+              }, nextDeploymentType, projectType)
+            ).filter((entry) => entry.id);
+          }
+        }
       }
 
       setDeploymentType(nextDeploymentType);
@@ -1190,11 +1229,11 @@ export default function APIDeploy({ isGateway = false }) {
     window.setTimeout(() => setCopiedId(''), 1200);
   };
 
-  const orgOptions = apigeeOrgs.length > 0 ? apigeeOrgs : FALLBACK_APIGEE_ORGS;
+  // Do not show invented Apigee organisations/environments. They let users
+  // configure a deployment that can never succeed and hide the real API error.
+  const orgOptions = apigeeOrgs;
   const envOptions = isApigeeManagementFlow
-    ? apigeeEnvs.length > 0
-      ? apigeeEnvs
-      : FALLBACK_APIGEE_ENVS
+    ? apigeeEnvs
     : GENERIC_ENVS;
 
   return (
@@ -1220,7 +1259,7 @@ export default function APIDeploy({ isGateway = false }) {
             copiedId={copiedId}
             copyText={copyText}
             isGateway={isGateway}
-            onBack={() => navigate('/api-deploy', { state: { isGateway } })}
+            onBack={() => navigate(isGateway ? '/gateway/api-deploy' : '/api-deploy')}
           />
         ) : routeMode === 'detail' ? (
           <DeploymentDetailPage
@@ -1291,7 +1330,7 @@ export default function APIDeploy({ isGateway = false }) {
             history={history}
             copiedId={copiedId}
             copyText={copyText}
-            onHistoryClick={() => navigate('/api-deploy/history', { state: { isGateway } })}
+            onHistoryClick={() => navigate(isGateway ? '/gateway/api-deploy/history' : '/api-deploy/history')}
             isGateway={isGateway}
             onGatewayBack={gatewayBackPath}
           />
@@ -2294,7 +2333,8 @@ function ApigeeManagementDeployPage({
         onViewAll={() => {
           const proxyFilter = selectedItem.apigeeProxyName || selectedItem.name;
           setShowRecentActivityModal(false);
-          navigate(`/api-deploy/history?category=apigee&subtype=proxy&proxy=${encodeURIComponent(proxyFilter)}`);
+          const historyPath = isGateway ? '/gateway/api-deploy/history' : '/api-deploy/history';
+          navigate(`${historyPath}?category=apigee&subtype=proxy&proxy=${encodeURIComponent(proxyFilter)}`);
         }}
       />
 

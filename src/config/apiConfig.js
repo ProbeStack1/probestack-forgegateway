@@ -139,6 +139,7 @@ TEST_CASE: {
     COMPARE_RUNS: `${API_BASE_URL}/test/api/v1/test-specs/compare-runs`,
   },
   API_DEVELOPMENT: {
+    GET_DEPLOYMENT_CATALOG: (projectType) => `${API_BASE_URL}/api-development/v1/api-development/deployment-catalog${projectType ? `?projectType=${encodeURIComponent(projectType)}` : ''}`,
     CREATE_PROJECT_METADATA: `${API_BASE_URL}/api-development/v1/project-metadata`,
     GENERATE_CODE: (microserviceId) => `${API_BASE_URL}/api-development/v1/api-development/${microserviceId}/generate-code`,
     GET_CODE_ARTIFACT: (microserviceId) => `${API_BASE_URL}/api-development/v1/api-development/${microserviceId}/code-artifact`,

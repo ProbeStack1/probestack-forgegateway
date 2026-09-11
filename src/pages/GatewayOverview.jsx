@@ -757,6 +757,8 @@ export const GatewayOverview = ({ showHeader = false, showMessage }) => {
             <Route path="gateway-env" element={<GatewayEnvironmentsView showMessage={showMessage} />} />
             <Route path="cicd-automation" element={<CicdAutomationPage />} />
             <Route path="api-deploy" element={<APIDeploy showHeader={false} isGateway={true} />} />
+            <Route path="api-deploy/history" element={<APIDeploy showHeader={false} isGateway={true} />} />
+            <Route path="api-deploy/:microserviceId/deploy" element={<APIDeploy showHeader={false} isGateway={true} />} />
             <Route path="proxy-test" element={<APITest showHeader={false} isGateway={true} />} />
             <Route path="profile" element={<Profile showHeader={false} />} />
             <Route path="audit-logs" element={<GatewayAuditLogs />} />

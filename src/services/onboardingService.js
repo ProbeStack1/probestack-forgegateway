@@ -295,7 +295,19 @@ export const onboardingService = {
       const response = await axiosInstance.get(
         API_ENDPOINTS.ONBOARDING.GET_ALL_BY_PROJECT_TYPE(projectType)
       );
-      return { success: true, data: response.data };
+      // Older deployments return an array in `data`; the current paginated
+      // endpoint returns it in `data.content`/`data.items`. Keep the original
+      // envelope and expose one stable array so consumers (notably AI Deploy)
+      // do not incorrectly show "No deployable APIs found" for a valid page.
+      const payload = response.data?.data ?? response.data ?? {};
+      const rows = extractPageContent(response.data);
+      return {
+        success: true,
+        data: {
+          ...(payload && !Array.isArray(payload) ? payload : {}),
+          data: rows,
+        },
+      };
     } catch (error) {
       return {
         success: false,
